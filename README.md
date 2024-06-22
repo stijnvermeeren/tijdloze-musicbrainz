@@ -18,11 +18,11 @@ However, in order to add such songs to the `tijdloze.rocks` database, more infor
 
 Initially, the admin interface for _tijdloze.rocks_ used the Spotify API to extract this data automatically, where possible. However, there is also an open music database called [MusicBrainz](https://musicbrainz.org/), with data that is much more complete and accurate. Moreover, once a song, album or artist is matched with the MusicBrainz database, it becomes much easier to retrieve additional data from other databases (e.g. [Wikidata](https://www.wikidata.org/)).
 
-However, querying the relevant information from MusicBrainz is not a trivial task. While MusicBrainz does offer an [API](https://musicbrainz.org/doc/MusicBrainz_API), retrieving all the relevant, would require a large number of API calls, even for a single song. Replicating the full Musicbrainz database, and doing queries directly on that Postgres database, offer more flexibility, but requires a huge amount of disk space (ca. 100 GB), and still the queries can be complex and inefficient. The final solution is to do a significant amount of preprocessing on the MusicBrainz database, creating new tables in a structure that is optimized for the _tijdloze.rocks_ use case, and filled with only the relevant data. These new tables allow for efficient querying, while the total disk space required is only around 4 GB.  This repository contains all the code and instructions required to reproduce this "tijdloze.rocks MusicBrainz dataset".
+However, querying the relevant information from MusicBrainz is not a trivial task. While MusicBrainz does offer an [API](https://musicbrainz.org/doc/MusicBrainz_API), retrieving all the relevant data would require a large number of API calls, even for a single song. Replicating the full Musicbrainz database, and doing queries directly on that Postgres database, offer more flexibility, but requires a huge amount of disk space (ca. 100 GB), and still the queries can be complex and inefficient. The final solution is to do a significant amount of preprocessing on the MusicBrainz database, creating new tables in a structure that is optimized for the _tijdloze.rocks_ use case, and filled with only the relevant data. These new tables allow for efficient querying, while the total disk space required is only around 4 GB.  This repository contains all the code and instructions required to reproduce this "tijdloze.rocks MusicBrainz dataset".
 
 ### MusicBrainz database structure
 
-The most relevant data types from the MusicBrainz database are artists, release groups, releases, recordings and works. As an examples: 
+The most relevant data types from the MusicBrainz database are artists, release groups, releases, recordings and works. As an example: 
 - The _artist_ [Nirvana](https://musicbrainz.org/artist/5b11f4ce-a62d-471e-81fc-a69a8278c7da) has a _release group_ [Nevermind](https://musicbrainz.org/release-group/1b022e01-4da6-387b-8658-8678046e4cef).
 - In the tijdloze.rocks database, the MusicBrainz _release group_ would correspond to an album. However, in the Musicbrainz database, a single release group can have many different releases, with each their own track listing (e.g. different bonus tracks, special editions, ...), format (CD, vinyl, ...), release date (different release dates in different countries, anniversary editions, ...), etc.
 - A song such as [Smells Like Teen Spirit](https://musicbrainz.org/work/9840e142-269d-3fa3-9805-041a9235c18a) is a _work_ in the MusicBrainz database. Usually, there exist many different _recordings_ of a work (early demo version, album version, live recordings, covers by different artists). Often, a single recording can be identified as the "canonical recording" for that work, that is: the recording that you expect to be played on the radio when you request that song (e.g. [Smell Like Teen Spirit](https://musicbrainz.org/recording/5fb524f1-8cc8-4c04-a921-e34c0a911ea7)).
@@ -57,7 +57,7 @@ Below is a summary of the minimal required steps. More details and other options
 
 #### Install required software
 
-```
+```bash
 sudo apt-get update && \
 sudo apt-get install docker.io docker-compose-v2 git && \
 sudo systemctl enable --now docker.service
@@ -67,7 +67,7 @@ Note: on Ubuntu 24.04, install `docker-compose-v2` (as in the command above) ins
 
 #### Clone the repository
 
-```
+```bash
 git clone https://github.com/metabrainz/musicbrainz-docker.git
 cd musicbrainz-docker
 ```
@@ -75,7 +75,7 @@ cd musicbrainz-docker
 #### Change configuration
 
 Change configuration to "mirror database only":
-```
+```bash
 admin/configure with alt-db-only-mirror
 ```
 
@@ -100,7 +100,7 @@ If you want to open up the Postgres database to the internet (e.g. you are setti
 Set a strong password for the Postgres user by modifying the file `default/postgres.env`.
 
 Publish the Postgres port in the Docker container by running:
-```
+```bash
 admin/configure add publishing-db-port
 ```
 
@@ -108,13 +108,13 @@ When using EC2, change the "Security group" configuration for your EC2 instance 
 
 #### Build the Docker images
 
-```
+```bash
 sudo docker compose build
 ```
 
 #### Load the latest database dump
 
-```
+```bash
 sudo docker compose run --rm musicbrainz createdb.sh -fetch
 ```
 
@@ -124,18 +124,35 @@ After executing this command, you will be asked to confirm whether you are plann
 
 Create a new schema `musicbrainz_export` in the database, by executing the commands from [sql/0_set_default_schema.sql](sql/0_set_default_schema.sql). 
 
+```bash
+psql -U musicbrainz -d musicbrainz_db < sql/0_set_default_schema.sql 
+```
+
 Create a mapping from the more fine-grained Musicbrainz `area_id` values to the [ISO 3166-1 alpha-2](https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2) country codes used in the _tijdloze.rocks_ database, by executing the commands from [sql/1_area_id_country_id.sql](sql/1_area_id_country_id.sql).
+
+```bash
+psql -U musicbrainz -d musicbrainz_db < sql/1_area_id_country_id.sql
+```
 
 Create the schema for the tables `mb_artist`, `mb_artist_alias`, `mb_album`, `mb_song` and `mb_song_alias` that will be exported to the _tijdloze.rocks_ database, by executing the commands from [sql/2_export_tables.sql](sql/2_export_tables.sql).
 
+```bash
+psql -U musicbrainz -d musicbrainz_db < sql/2_export_tables.sql 
+```
+
 Fill the `mb_artist` and `mb_artist_alias` tables with data, by executing the commands from [sql/3_artist_data.sql](sql/3_artist_data.sql) and [sql/4_artist_alias_data.sql](sql/4_artist_alias_data.sql).
+
+```bash
+psql -U musicbrainz -d musicbrainz_db < sql/3_artist_data.sql 
+psql -U musicbrainz -d musicbrainz_db < sql/4_artist_alias_data.sql 
+```
 
 ### Run the script to compute the songs and albums
 
 Run the Python script that fill the `mb_album` and `mb_song` tables with data.
 
 Create a virtual environment and install the Python dependencies:
-```
+```bash
 python3 -m venv env
 source env/bin/activate
 pip install requirements.txt
@@ -150,7 +167,7 @@ MB_DB_PASSWORD=musicbrainz
 ```
 
 Execute the `main.py` script:
-```
+```bash
 python scr/main.py
 ```
 
@@ -160,7 +177,21 @@ Executing the script will take ca. 8 hours using the recommended EC2 instance.
 
 Fill the `mb_song_alias` table with data, by executing the commands from [sql/5_song_alias_data.sql](sql/5_song_alias_data.sql).
 
+```bash
+psql -U musicbrainz -d musicbrainz_db < sql/5_song_alias_data.sql 
+```
+
 Executing the query will take ca. 12 minutes using the recommended EC2 instance.
+
+### Dump the new tables
+
+```bash
+pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_artist musicbrainz_db > mb_artist.dump
+pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_artist_alias musicbrainz_db > mb_artist_alias.dump
+pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_album musicbrainz_db > mb_artist.dump
+pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_song musicbrainz_db > mb_song.dump
+pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_song_alias musicbrainz_db > mb_song_alias.dump
+```
 
 ## Query for creating tijdlozedb.csv dataset
 
