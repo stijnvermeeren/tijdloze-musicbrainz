@@ -29,6 +29,8 @@ The most relevant data types from the MusicBrainz database are artists, release 
 - In some rare cases, a single work might appear divided into several tracks on most releases of the canonical release group (e.g. [Shine On You Crazy Diamond](https://musicbrainz.org/work/c8f8379b-e755-3446-9fac-44c11b8c520f) on [Wish You Were Here](https://musicbrainz.org/release-group/1a272023-10d3-38ee-bab3-317b55fcc21d)). Conversely, sometimes a single recording might contain several works (e.g. TODO).
 - Singles will also appear as their own _release group_ (e.g. [Smells Like Teen Spirit](https://musicbrainz.org/release-group/03345972-d2f8-36bb-b49a-03a9ceccb7a7)).
 
+MusicBrainz also releases some ["canonical" data](https://musicbrainz.org/doc/Canonical_MusicBrainz_data), including for each recording a reference to "the most canonical version of that recording, often the version that appears on the first album where it was released." However, the way this "canonical data" is constructed is not very transparent, and we've found that there are too many cases where the chosen recording in this dataset does not match the requirements for our _tijdloze.rocks_ use case. 
+
 ### tijdloze.rocks MusicBrainz dataset generation
 
 The dataset is generated as follows:
@@ -152,12 +154,13 @@ Execute the `main.py` script:
 python scr/main.py
 ```
 
-Executing the script will take ca. 5 hours using the recommended EC2 instance. 
+Executing the script will take ca. 8 hours using the recommended EC2 instance. 
 
 ### Fill table `mb_song_alias`
 
-Fill the `mb_artist` and `mb_artist_alias` tables with data, by executing the commands from [sql/5_song_alias_data.sql](sql/5_song_alias_data.sql).
+Fill the `mb_song_alias` table with data, by executing the commands from [sql/5_song_alias_data.sql](sql/5_song_alias_data.sql).
 
+Executing the query will take ca. 12 minutes using the recommended EC2 instance.
 
 ## Query for creating tijdlozedb.csv dataset
 
