@@ -51,7 +51,7 @@ Later on, when the dataset is used for querying, such as e.g. in the [tijdloze.r
 
 Create a replication of Musicbrainz database, following the instructions from the [musicbrainz-docker](https://github.com/metabrainz/musicbrainz-docker) repository.
 
-We recommend executing these steps on a Virtual machine. For example, on AWS, you could launch an Ubuntu Linux `t2.large` EC2 instance with a 100 GB root volume (cost: ca. 0.12 USD per hour).
+We recommend executing these steps on a Virtual machine. For example, on AWS, you could launch a `t2.medium` EC2 instance with Ubuntu Linux 24.04 with a 100 GB root volume (cost: ca. 0.7 USD per hour).
 
 Below is a summary of the minimal required steps. More details and other options can be found in the README of the [musicbrainz-docker](https://github.com/metabrainz/musicbrainz-docker) repository. 
 
@@ -79,10 +79,7 @@ Change configuration to "mirror database only":
 admin/configure with alt-db-only-mirror
 ```
 
-Give more memory to the database by creating a file `local/compose/memory-settings.yml` containing
-```
-```
-and then running
+Optionally, give more memory to the database by creating a file `local/compose/memory-settings.yml` containing
 ```
 version: '3.1'
 
@@ -90,21 +87,24 @@ version: '3.1'
 
 services:
   db:
-    command: postgres -c "shared_buffers=6GB" -c "shared_preload_libraries=pg_amqp.so"
+    command: postgres -c "shared_buffers=3GB" -c "shared_preload_libraries=pg_amqp.so"
 ```
-
-#### (Optional) Open up the database to the internet
-
-If you want to open up the Postgres database to the internet (e.g. you are setting up the database on an EC2 VM, but you want to access it using a database tool such as [DBeaver](https://dbeaver.io/) on your local laptop), then follow steps below.
-
-Set a strong password for the Postgres user by modifying the file `default/postgres.env`.
+and then running 
+```
+admin/configure add local/compose/memory-settings.yml
+```
+Make sure not to ask for more memory than what is available on the system, or the Postgres Docker container will fail to start. 
 
 Publish the Postgres port in the Docker container by running:
 ```bash
 admin/configure add publishing-db-port
 ```
 
-When using EC2, change the "Security group" configuration for your EC2 instance on the AWS console, adding an inbound rule allowing traffic on the Postgres port (5432).
+#### (Optional) Open up the database to the internet
+
+If you want to open up the Postgres database to the internet (e.g. you are setting up the database on an EC2 VM, but you want to access it using a database tool such as [DBeaver](https://dbeaver.io/) on your local laptop), then follow steps below.
+- Set a strong password for the Postgres user by modifying the file `default/postgres.env`.
+- When using EC2, change the "Security group" configuration for your EC2 instance on the AWS console, adding an inbound rule allowing traffic on the Postgres port (5432).
 
 #### Build the Docker images
 

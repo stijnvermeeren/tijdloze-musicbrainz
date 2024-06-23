@@ -1,6 +1,7 @@
 from util import query, search_key
 from dotenv import load_dotenv
 
+from tqdm import tqdm
 import psycopg2
 import dataclasses
 import os
@@ -18,6 +19,7 @@ class Entry:
     release_type: int
     release_secondary_types: list[int]
     release_year: int
+    release_group_year: int
     is_single_from: int
     recording_score: int
 
@@ -94,12 +96,13 @@ def process_artist(cursor, artist_id: int):
             release_group.gid as release_group_mb_id, 
             release_group.name as release_group_name,
             release_group.type as release_type,
+            MIN(release_country.date_year) as release_year,
             (
                 SELECT MIN(date_year) 
                 FROM "release_country" 
                 JOIN "release" release2 ON release_country.release = release2.id 
                 WHERE release2."release_group" = "release_group".id
-            ) as release_year,
+            ) as release_group_year,
             (SELECT array_agg(secondary_type) FROM release_group_secondary_type_join WHERE release_group_secondary_type_join.release_group = release_group.id) as secondary_types,
             "recording"."id" as recording_id,
             "recording"."gid" as recording_mb_id,
@@ -109,6 +112,7 @@ def process_artist(cursor, artist_id: int):
         JOIN "musicbrainz"."track" ON "recording"."id" = "track"."recording"
         JOIN "musicbrainz"."medium" ON "track"."medium" = "medium"."id" 
         JOIN "musicbrainz"."release" ON "medium"."release" = "release"."id"
+        JOIN "musicbrainz"."release_country" ON "release"."id" = "release_country"."release"
         JOIN "musicbrainz"."release_group" ON "release"."release_group" = "release_group"."id"
         JOIN "musicbrainz"."artist_credit" AS artist_credit_rg ON artist_credit_rg.id = "release_group"."artist_credit"
         JOIN "musicbrainz"."artist_credit_name" AS artist_credit_name_rg ON artist_credit_name_rg."artist_credit" = artist_credit_rg."id"
@@ -138,6 +142,7 @@ def process_artist(cursor, artist_id: int):
             release_type=entry['release_type'],
             release_secondary_types=entry['secondary_types'],
             release_year=entry['release_year'],
+            release_group_year=entry['release_group_year'],
             is_single_from=is_single_from,
             recording_score=entry['recording_score']
         )
@@ -160,7 +165,7 @@ def process_artist(cursor, artist_id: int):
             best_match.release_group_id,
             best_match.release_group_mb_id,
             best_match.release_group_name.replace("'", "''"),
-            best_match.release_year,
+            best_match.release_group_year,
             is_single
         )
 
@@ -210,8 +215,7 @@ try:
     ) as conn:
         with conn.cursor() as cursor:
             sql_query = """SELECT id, name FROM "musicbrainz_export"."mb_artist" ORDER BY score DESC;"""
-            for artist in query(cursor, sql_query):
-                print(artist['name'])
+            for artist in tqdm(query(cursor, sql_query)):
                 process_artist(cursor, artist['id'])
                 conn.commit()
 except psycopg2.DatabaseError as error:
