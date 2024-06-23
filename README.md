@@ -51,23 +51,26 @@ Later on, when the dataset is used for querying, such as e.g. in the [tijdloze.r
 
 Create a replication of Musicbrainz database, following the instructions from the [musicbrainz-docker](https://github.com/metabrainz/musicbrainz-docker) repository.
 
-We recommend executing these steps on a Virtual machine. For example, on AWS, you could launch a `t2.medium` EC2 instance with Ubuntu Linux 24.04 with a 100 GB root volume (cost: ca. 0.7 USD per hour).
+We recommend executing these steps on a Virtual machine. For example, on AWS, you could launch a `t2.large` EC2 instance with Ubuntu Linux 24.04 with a 100 GB root volume (cost: ca. 0.12 USD per hour).
 
 Below is a summary of the minimal required steps. More details and other options can be found in the README of the [musicbrainz-docker](https://github.com/metabrainz/musicbrainz-docker) repository. 
 
 #### Install required software
 
+Install the required dependencies from the `musicbrainz-docker`, plus Python and a PostgreSQL client (unless you want to generate the dataset from a different machine).
+
 ```bash
 sudo apt-get update && \
-sudo apt-get install docker.io docker-compose-v2 git && \
+sudo apt-get -y install docker.io docker-compose-v2 git postgresql-client-common postgresql-client-16 python3-pip python3-venv && \
 sudo systemctl enable --now docker.service
 ```
 
 Note: on Ubuntu 24.04, install `docker-compose-v2` (as in the command above) instead of `docker-compose` (as instructed in the official README). Also, execute all Docker Compose commands using `docker compose` instead of `docker-compose` (space instead of hyphen).
 
-#### Clone the repository
+#### Clone the current repository and the musicbrainz-docker repository
 
 ```bash
+git clone https://github.com/stijnvermeeren/tijdloze-musicbrainz
 git clone https://github.com/metabrainz/musicbrainz-docker.git
 cd musicbrainz-docker
 ```
@@ -87,7 +90,7 @@ version: '3.1'
 
 services:
   db:
-    command: postgres -c "shared_buffers=3GB" -c "shared_preload_libraries=pg_amqp.so"
+    command: postgres -c "shared_buffers=6GB" -c "shared_preload_libraries=pg_amqp.so"
 ```
 and then running 
 ```
@@ -112,6 +115,8 @@ If you want to open up the Postgres database to the internet (e.g. you are setti
 sudo docker compose build
 ```
 
+This takes ca. 2 minutes.
+
 #### Load the latest database dump
 
 ```bash
@@ -122,29 +127,34 @@ After executing this command, you will be asked to confirm whether you are plann
 
 ### Create database schema for export
 
+Navigate to the clone of this repository:
+```
+cd ../tijdloze-musicbrainz
+```
+
 Create a new schema `musicbrainz_export` in the database, by executing the commands from [sql/0_set_default_schema.sql](sql/0_set_default_schema.sql). 
 
 ```bash
-psql -U musicbrainz -d musicbrainz_db < sql/0_set_default_schema.sql 
+psql -h localhost -U musicbrainz -d musicbrainz_db < sql/0_set_default_schema.sql 
 ```
 
 Create a mapping from the more fine-grained Musicbrainz `area_id` values to the [ISO 3166-1 alpha-2](https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2) country codes used in the _tijdloze.rocks_ database, by executing the commands from [sql/1_area_id_country_id.sql](sql/1_area_id_country_id.sql).
 
 ```bash
-psql -U musicbrainz -d musicbrainz_db < sql/1_area_id_country_id.sql
+psql -h localhost -U musicbrainz -d musicbrainz_db < sql/1_area_id_country_id.sql
 ```
 
 Create the schema for the tables `mb_artist`, `mb_artist_alias`, `mb_album`, `mb_song` and `mb_song_alias` that will be exported to the _tijdloze.rocks_ database, by executing the commands from [sql/2_export_tables.sql](sql/2_export_tables.sql).
 
 ```bash
-psql -U musicbrainz -d musicbrainz_db < sql/2_export_tables.sql 
+psql -h localhost -U musicbrainz -d musicbrainz_db < sql/2_export_tables.sql 
 ```
 
 Fill the `mb_artist` and `mb_artist_alias` tables with data, by executing the commands from [sql/3_artist_data.sql](sql/3_artist_data.sql) and [sql/4_artist_alias_data.sql](sql/4_artist_alias_data.sql).
 
 ```bash
-psql -U musicbrainz -d musicbrainz_db < sql/3_artist_data.sql 
-psql -U musicbrainz -d musicbrainz_db < sql/4_artist_alias_data.sql 
+psql -h localhost -U musicbrainz -d musicbrainz_db < sql/3_artist_data.sql 
+psql -h localhost -U musicbrainz -d musicbrainz_db < sql/4_artist_alias_data.sql 
 ```
 
 ### Run the script to compute the songs and albums
@@ -155,7 +165,7 @@ Create a virtual environment and install the Python dependencies:
 ```bash
 python3 -m venv env
 source env/bin/activate
-pip install requirements.txt
+pip install -r requirements.txt
 ```
 
 Create a file `.env` with the following contents, modifying the values where necessary:
@@ -168,7 +178,7 @@ MB_DB_PASSWORD=musicbrainz
 
 Execute the `main.py` script:
 ```bash
-python scr/main.py
+python src/main.py
 ```
 
 Executing the script will take ca. 8 hours using the recommended EC2 instance. 
