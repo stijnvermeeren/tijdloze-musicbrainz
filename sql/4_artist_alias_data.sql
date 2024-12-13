@@ -1,3 +1,4 @@
+SET search_path TO musicbrainz_export, musicbrainz, public;
 
 WITH data AS (
     SELECT id, "name"
