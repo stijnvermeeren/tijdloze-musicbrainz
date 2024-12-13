@@ -1,4 +1,6 @@
 
+SET search_path = musicbrainz, public, musicbrainz_export;
+
 WITH data AS (
     SELECT id, "name"
     FROM "musicbrainz_export"."mb_artist"
