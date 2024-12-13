@@ -29,6 +29,6 @@ WITH data AS (
     JOIN "musicbrainz"."work_alias" ON "work_alias"."work" = "work"."id"
 )
 INSERT INTO "musicbrainz_export"."mb_song_alias"
-SELECT id, LOWER(REGEXP_REPLACE(name, '\W', '', 'g'))
+SELECT id, LOWER(REGEXP_REPLACE(UNACCENT(name), '\W', '', 'g'))
 FROM data
 ON CONFLICT ("song_id", "alias") DO NOTHING;

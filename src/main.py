@@ -154,7 +154,15 @@ def process_artist(cursor, artist_id: int):
     album_values = {}
     song_values = {}
     for recording_id, recording_songs in songs.items():
+        # if recording_id != 437504:
+        #     continue
+
+        # for song in recording_songs:
+        #     print(song)
+
         best_match = min(recording_songs, key=lambda song: song.sort_key())
+
+        # print(best_match)
 
         if best_match.release_type == 2:
             is_single = 'TRUE'
@@ -214,7 +222,12 @@ try:
             password=os.getenv("MB_DB_PASSWORD")
     ) as conn:
         with conn.cursor() as cursor:
-            sql_query = """SELECT id, name FROM "musicbrainz_export"."mb_artist" ORDER BY score DESC;"""
+            sql_query = """
+                SELECT id, name 
+                FROM "musicbrainz"."mb_artist"
+                -- WHERE "mb_artist"."id" = 3534 
+                ORDER BY score DESC;
+            """
             for artist in tqdm(query(cursor, sql_query)):
                 process_artist(cursor, artist['id'])
                 conn.commit()

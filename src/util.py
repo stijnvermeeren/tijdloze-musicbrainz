@@ -1,4 +1,5 @@
 import re
+from unidecode import unidecode
 
 
 def query(cursor, query):
@@ -12,4 +13,4 @@ def query(cursor, query):
 
 def search_key(value: str) -> str:
     # TODO: when "(live)" in title, then restrict search to live albums
-    return re.sub(r'[^a-zA-Z0-9]+', '', value.lower().replace("(live)", ""))
+    return re.sub(r'[^a-zA-Z0-9]+', '', unidecode(value).lower().replace("(live)", ""))

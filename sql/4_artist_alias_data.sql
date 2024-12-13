@@ -26,6 +26,6 @@ WITH data AS (
 INSERT INTO "musicbrainz_export"."mb_artist_alias" (artist_id, alias)
 SELECT
     id,
-    LOWER(REGEXP_REPLACE(name, '\W', '', 'g'))
+    LOWER(REGEXP_REPLACE(UNACCENT(name), '\W', '', 'g'))
 FROM data
 ON CONFLICT ("artist_id", "alias") DO NOTHING;
