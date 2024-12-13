@@ -1,5 +1,5 @@
 
-
+SET search_path = musicbrainz, public, musicbrainz_export;
 
 WITH data AS (
     SELECT mb_song.id, recording.name
