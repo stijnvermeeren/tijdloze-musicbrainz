@@ -1,3 +1,5 @@
+CREATE EXTENSION unaccent;
+
 WITH data AS (
     SELECT id, "name"
     FROM "musicbrainz_export"."mb_artist"

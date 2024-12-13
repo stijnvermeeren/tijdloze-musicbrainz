@@ -125,6 +125,13 @@ sudo docker compose run --rm musicbrainz createdb.sh -fetch
 
 After executing this command, you will be asked to confirm whether you are planning to use the Musicbrainz dump for commercial purposes or not. After that, the loading of the database dump will take ca. 75 minutes (on the recommended EC2 instance).
 
+### Install postgres client
+
+
+```bash
+sudo apt-get -y install postgresql-client-common postgresql-client
+```
+
 ### Create database schema for export
 
 Navigate to the clone of this repository:
