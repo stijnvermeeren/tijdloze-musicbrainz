@@ -1,4 +1,3 @@
-CREATE EXTENSION unaccent;
 
 WITH data AS (
     SELECT id, "name"
@@ -28,6 +27,6 @@ WITH data AS (
 INSERT INTO "musicbrainz_export"."mb_artist_alias" (artist_id, alias)
 SELECT
     id,
-    LOWER(REGEXP_REPLACE(UNACCENT(name), '\W', '', 'g'))
+    LOWER(REGEXP_REPLACE(UNACCENT(name::text), '\W', '', 'g'))
 FROM data
 ON CONFLICT ("artist_id", "alias") DO NOTHING;
