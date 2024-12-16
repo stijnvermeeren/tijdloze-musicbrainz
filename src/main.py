@@ -5,6 +5,7 @@ from tqdm import tqdm
 import psycopg2
 import dataclasses
 import os
+import argparse
 
 load_dotenv()
 
@@ -69,7 +70,7 @@ class Entry:
         return (year_value, reference_priorty, type_priority)
 
 
-def process_artist(cursor, artist_id: int):
+def process_artist(cursor, artist_id: int, args):
     singlesQuery = """
         SELECT
             release_group.name AS title,
@@ -122,10 +123,42 @@ def process_artist(cursor, artist_id: int):
         GROUP BY recording.id, release_group.id
     """.format(artist_id)
 
+    recordings_query_soundtrack = """
+        SELECT
+            release_group.id as release_group_id, 
+            release_group.gid as release_group_mb_id, 
+            release_group.name as release_group_name,
+            release_group.type as release_type,
+            MIN(release_country.date_year) as release_year,
+            (
+                SELECT MIN(date_year) 
+                FROM "release_country" 
+                JOIN "release" release2 ON release_country.release = release2.id 
+                WHERE release2."release_group" = "release_group".id
+            ) as release_group_year,
+            (SELECT array_agg(secondary_type) FROM release_group_secondary_type_join WHERE release_group_secondary_type_join.release_group = release_group.id) as secondary_types,
+            "recording"."id" as recording_id,
+            "recording"."gid" as recording_mb_id,
+            "recording"."name" as recording_name,
+            (SELECT COUNT(*) FROM "release" r2 JOIN "medium" m2 ON m2."release" = r2."id" JOIN "track" t2 ON t2."medium" = m2."id" WHERE t2."recording" = "recording"."id") as recording_score
+        FROM "musicbrainz"."recording"
+        JOIN "musicbrainz"."track" ON "recording"."id" = "track"."recording"
+        JOIN "musicbrainz"."medium" ON "track"."medium" = "medium"."id" 
+        JOIN "musicbrainz"."release" ON "medium"."release" = "release"."id"
+        JOIN "musicbrainz"."release_country" ON "release"."id" = "release_country"."release"
+        JOIN "musicbrainz"."release_group" ON "release"."release_group" = "release_group"."id"
+        JOIN "musicbrainz"."artist_credit" ON "artist_credit".id = "recording"."artist_credit"
+        JOIN "musicbrainz"."artist_credit_name" ON "artist_credit_name"."artist_credit" = "artist_credit"."id" AND "artist_credit_name"."position" = 0
+        JOIN "musicbrainz"."release_group_secondary_type_join" ON "release_group_secondary_type_join"."release_group" = "release_group"."id"
+        WHERE "artist_credit_name"."artist" = {} AND "release"."status" = 1 AND "release_group_secondary_type_join"."secondary_type" = 2
+        GROUP BY recording.id, release_group.id
+    """.format(artist_id)
+
     songs = {}
-    for entry in query(cursor, recordings_query):
+
+    def process_entry(entry):
         if entry['release_year'] is None:
-            continue
+            return
 
         title = entry['recording_name']
         release_group_mb_id = entry['release_group_mb_id']
@@ -147,22 +180,30 @@ def process_artist(cursor, artist_id: int):
             recording_score=entry['recording_score']
         )
 
-        if song.recording_id not in songs:
-            songs[song.recording_id] = []
-        songs[song.recording_id].append(song)
+        if song.recording_mb_id not in songs:
+            songs[song.recording_mb_id] = []
+        songs[song.recording_mb_id].append(song)
+
+    for entry in query(cursor, recordings_query):
+        process_entry(entry)
+    for entry in query(cursor, recordings_query_soundtrack):
+        process_entry(entry)
 
     album_values = {}
     song_values = {}
-    for recording_id, recording_songs in songs.items():
-        # if recording_id != 437504:
-        #     continue
-
-        # for song in recording_songs:
-        #     print(song)
+    for recording_mb_id, recording_songs in songs.items():
+        if args.recording_id:
+            if args.recording_id == recording_mb_id:
+                for song in recording_songs:
+                    print(song)
+            else:
+                continue
 
         best_match = min(recording_songs, key=lambda song: song.sort_key())
 
-        # print(best_match)
+        if args.recording_id:
+            if args.recording_id == recording_mb_id:
+                print(best_match)
 
         if best_match.release_type == 2:
             is_single = 'TRUE'
@@ -215,6 +256,12 @@ def process_artist(cursor, artist_id: int):
 
 
 try:
+    parser=argparse.ArgumentParser()
+    parser.add_argument("--artist")
+    parser.add_argument("--artist_id")
+    parser.add_argument("--recording_id")
+    args=parser.parse_args()
+
     with psycopg2.connect(
             host=os.getenv("MB_DB_HOST"),
             database=os.getenv("MB_DB_NAME"),
@@ -222,14 +269,21 @@ try:
             password=os.getenv("MB_DB_PASSWORD")
     ) as conn:
         with conn.cursor() as cursor:
+            if args.artist_id:
+                where = """WHERE "mb_artist"."id" = {}""".format(args.artist_id)
+            elif args.artist:
+                where = """WHERE "mb_artist"."name" = '{}'""".format(args.artist)
+            else:
+                where = ""
             sql_query = """
                 SELECT id, name 
-                FROM "musicbrainz"."mb_artist"
-                -- WHERE "mb_artist"."id" = 3534 
+                FROM "musicbrainz_export"."mb_artist"
+                {} 
                 ORDER BY score DESC;
-            """
+            """.format(where)
             for artist in tqdm(query(cursor, sql_query)):
-                process_artist(cursor, artist['id'])
+                print(artist)
+                process_artist(cursor, artist['id'], args)
                 conn.commit()
 except psycopg2.DatabaseError as error:
     print("Error: {}".format(error))
