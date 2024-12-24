@@ -210,16 +210,17 @@ pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrain
 pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_song_alias musicbrainz_db > mb_song_alias.dump
 ```
 
-## Query for creating tijdlozedb.csv dataset
+## Query for creating benchmarking dataset
 
 ```postgresql
 SELECT
-song.id, song.title,
-album.id as "album_id", album.title as "album_title", album.release_year, album.musicbrainz_id,
-artist.id as "artist_id", IFNULL(CONCAT(artist.name_prefix, " ", artist.name), artist.name) as "artist_name", artist.country_id as "artist_country_id", artist.musicbrainz_id as "artist_musicbrainz_id",
-artist2.id as "artist2_id", IFNULL(CONCAT(artist2.name_prefix, " ", artist2.name), artist2.name) as "artist2_name", artist2.country_id as "artist2_country_id", artist2.musicbrainz_id as "artist2_musicbrainz_id"
+  song.id,
+  song.title,
+  album.id as "album_id", album.title as "album_title", album.release_year, album.musicbrainz_id,
+  artist.id as "artist_id", artist.name as "artist_name", artist.country_id as "artist_country_id", artist.musicbrainz_id as "artist_musicbrainz_id",
+  artist2.id as "artist2_id", artist2.name as "artist2_name", artist2.country_id as "artist2_country_id", artist2.musicbrainz_id as "artist2_musicbrainz_id"
 FROM song
-JOIN album ON album.id = song.album_id 
-JOIN artist ON artist.id = song.artist_id
-LEFT JOIN artist AS artist2 ON artist2.id = song.second_artist_id
+  JOIN album ON album.id = song.album_id
+  JOIN artist ON artist.id = song.artist_id
+  LEFT JOIN artist AS artist2 ON artist2.id = song.second_artist_id
 ```

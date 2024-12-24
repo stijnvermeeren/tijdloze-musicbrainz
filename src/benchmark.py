@@ -1,8 +1,17 @@
+from dataclasses import dataclass
+
+from psycopg2.errorcodes import FOREIGN_KEY_VIOLATION
+
 from util import query, search_key
+import os
 import psycopg2
 import csv
 import dataclasses
+from dotenv import load_dotenv
+from tqdm import tqdm
+import argparse
 
+load_dotenv()
 
 def clean(value: str) -> str:
     return (value
@@ -102,8 +111,8 @@ def search(cursor, search_artist: str, search_title: str) -> Song:
     songs = [song_from_result(entry) for entry in query(cursor, recordings_query)]
 
     if not len(songs):
-        recordings_query = recordings_query_template.format(where2)
-        songs = [song_from_result(entry) for entry in query(cursor, recordings_query)]
+       recordings_query = recordings_query_template.format(where2)
+       songs = [song_from_result(entry) for entry in query(cursor, recordings_query)]
 
     if len(songs):
         min_relevance = max([song.relevance_for_query(search_title) for song in songs]) / 2
@@ -112,6 +121,18 @@ def search(cursor, search_artist: str, search_title: str) -> Song:
             key=lambda song: (-song.release_year, song.relevance_for_query(search_title))
         )
         return best_match
+
+@dataclass
+class MatchResult:
+    song_id: int
+    title: str
+    artist: str
+    db_album_title: str
+    db_album_year: int
+    db_album_mb_id: str
+    mb_album_title: str
+    mb_album_year: int
+    mb_album_mb_id: str
 
 def process_song(cursor, row):
     if row["artist2_name"]:
@@ -149,21 +170,73 @@ def process_song(cursor, row):
         else:
             print("MB: {}".format(album_mb))
 
+    return MatchResult(
+        song_id=row["id"],
+        artist=row["artist_name"],
+        title=row["title"],
+        db_album_title=row["album_title"],
+        db_album_year=row["release_year"],
+        db_album_mb_id=row["musicbrainz_id"],
+        mb_album_title=song.album_title if song else None,
+        mb_album_year=song.release_year if song else None,
+        mb_album_mb_id=song.album_mb_id if song else None
+    )
 
 
 try:
+    parser=argparse.ArgumentParser()
+    parser.add_argument("--artist")
+    parser.add_argument("--title")
+    args=parser.parse_args()
+
+    results = []
+
     with psycopg2.connect(
-            host="ec2-54-93-206-123.eu-central-1.compute.amazonaws.com",
-            database="musicbrainz_db",
-            user="musicbrainz",
-            password="musicbrainz"
+        host=os.getenv("MB_DB_HOST"),
+        database=os.getenv("MB_DB_NAME"),
+        user=os.getenv("MB_DB_USER"),
+        password=os.getenv("MB_DB_PASSWORD")
     ) as conn:
         with conn.cursor() as cursor:
-            with open('tijdlozedb.csv', newline='') as csvfile:
+            cursor.execute("SET search_path = musicbrainz, public, musicbrainz_export;")
+            with open('benchmark/default.csv', encoding="utf-8-sig") as csvfile:
                  reader = csv.DictReader(csvfile)
-                 for row in reader:
-                     if row['title'] != 'Hotellounge':
-                         pass
-                     process_song(cursor, row)
+                 for row in tqdm(reader):
+                     if args.artist and not row['artist_name'].lower().startswith(args.artist.lower()):
+                         continue
+                     if args.title and not row['title'].lower().startswith(args.title.lower()):
+                         continue
+                     results.append(process_song(cursor, row))
+
+    total_count = len(results)
+    missing = [item for item in results if item.mb_album_mb_id is None]
+    wrong = [item for item in results if item.mb_album_mb_id and item.mb_album_mb_id != item.db_album_mb_id]
+    missing_count = len(missing)
+    wrong_count = len(wrong)
+    correct_count = total_count - missing_count - wrong_count
+
+    print()
+    print("NO MUSICBRAINZ MATCH:")
+    print()
+    for item in missing:
+        print(f"({item.song_id}) {item.artist} - {item.title}")
+        print(f"  DB: ({item.db_album_mb_id}) {item.db_album_title} ({item.db_album_year})")
+        print()
+
+    print()
+    print("INCORRECT MUSICBRAINZ MATCH:")
+    print()
+    for item in wrong:
+        print(f"({item.song_id}) {item.artist} - {item.title}")
+        print(f"  DB: ({item.db_album_mb_id}) {item.db_album_title} ({item.db_album_year})")
+        print(f"  MB: ({item.mb_album_mb_id}) {item.mb_album_title} ({item.mb_album_year})")
+        print()
+
+    print()
+    print("STATS")
+    print(f"Total: {total_count}")
+    print(f"Correct: {correct_count} ({(correct_count / total_count):.2%})")
+    print(f"Missing: {missing_count} ({(missing_count / total_count):.2%})")
+    print(f"Wrong: {wrong_count} ({(wrong_count / total_count):.2%})")
 except psycopg2.DatabaseError as error:
     print("Error: {}".format(error))
