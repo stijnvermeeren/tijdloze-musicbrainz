@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 
-from psycopg2.errorcodes import FOREIGN_KEY_VIOLATION
-
 from util import query, search_key
 import os
 import psycopg2
@@ -72,7 +70,7 @@ def search(cursor, search_artist: str, search_title: str) -> Song:
     where = """
     ("mb_song_alias"."alias" LIKE '{}%') AND (
         LENGTH("mb_artist_alias"."alias") < 255 
-        AND levenshtein_less_equal("mb_artist_alias"."alias", LOWER(REGEXP_REPLACE('{}', '\W', '', 'g')), 1) < 2
+        AND levenshtein_less_equal("mb_artist_alias"."alias", '{}', 1) < 2
     )
     """.format(search_key(search_title), search_key(search_artist))
 
@@ -81,7 +79,7 @@ def search(cursor, search_artist: str, search_title: str) -> Song:
         LENGTH("mb_song_alias"."alias") < 255 AND levenshtein_less_equal("mb_song_alias"."alias", '{}', 1) < 2
     ) AND (
         LENGTH("mb_artist_alias"."alias") < 255 
-        AND levenshtein_less_equal("mb_artist_alias"."alias", LOWER(REGEXP_REPLACE('{}', '\W', '', 'g')), 1) < 2
+        AND levenshtein_less_equal("mb_artist_alias"."alias", '{}', 1) < 2
     )
     """.format(search_key(search_title), search_key(search_artist))
 
@@ -120,7 +118,16 @@ def search(cursor, search_artist: str, search_title: str) -> Song:
             [song for song in songs if song.relevance_for_query(search_title) >= min_relevance],
             key=lambda song: (-song.release_year, song.relevance_for_query(search_title))
         )
+
+        # test = sorted(
+        #     [song for song in songs if song.relevance_for_query(search_title) >= min_relevance],
+        #     key=lambda song: (-song.release_year, song.relevance_for_query(search_title))
+        # )
+        # for i in test[:6]:
+        #     print(i)
+
         return best_match
+
 
 @dataclass
 class MatchResult:
@@ -133,6 +140,7 @@ class MatchResult:
     mb_album_title: str
     mb_album_year: int
     mb_album_mb_id: str
+    mb_recording_id: str
 
 def process_song(cursor, row):
     if row["artist2_name"]:
@@ -179,7 +187,8 @@ def process_song(cursor, row):
         db_album_mb_id=row["musicbrainz_id"],
         mb_album_title=song.album_title if song else None,
         mb_album_year=song.release_year if song else None,
-        mb_album_mb_id=song.album_mb_id if song else None
+        mb_album_mb_id=song.album_mb_id if song else None,
+        mb_recording_id=song.song_mb_id if song else None
     )
 
 
@@ -229,7 +238,7 @@ try:
     for item in wrong:
         print(f"({item.song_id}) {item.artist} - {item.title}")
         print(f"  DB: ({item.db_album_mb_id}) {item.db_album_title} ({item.db_album_year})")
-        print(f"  MB: ({item.mb_album_mb_id}) {item.mb_album_title} ({item.mb_album_year})")
+        print(f"  MB: ({item.mb_album_mb_id}) {item.mb_album_title} ({item.mb_album_year}) [{item.mb_recording_id}]")
         print()
 
     print()

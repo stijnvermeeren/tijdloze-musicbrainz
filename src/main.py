@@ -203,6 +203,7 @@ def process_artist(cursor, artist_id: int, args):
 
         if args.recording_id:
             if args.recording_id == recording_mb_id:
+                print()
                 print(best_match)
 
         if best_match.release_type == 2:
