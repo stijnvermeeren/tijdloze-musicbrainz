@@ -33,21 +33,20 @@ class Song:
     country_id: str
     is_single_from: int
     is_single: int
+    is_soundtrack: int
+    is_main_album: int
     recording_score: int
 
     def is_exact_match(self, query):
         return search_key(self.matched_alias) == search_key(query)
 
     def relevance_for_query(self, query):
-        if self.is_exact_match(query) and self.is_single_from:
-            return 5 * self.recording_score
+        is_single_from_factor = 10 if self.is_single_from else 1
+        is_main_album_factor = 10 if self.is_main_album else 1
+        # Example of a non-exact match: "Hotellounge (Be the Death of Me)" instead of "Hotellounge"
+        exact_match_factor = 10 if self.is_exact_match(query) else 1
 
-        if self.is_exact_match(query):
-            # exact match
-            return self.recording_score
-        else:
-            # e.g. "Hotellounge (Be the Death of Me)" instead of "Hotellounge"
-            return self.recording_score / 10
+        return self.recording_score * is_single_from_factor * is_main_album_factor * exact_match_factor
 
 def song_from_result(entry):
     return Song(
@@ -62,6 +61,8 @@ def song_from_result(entry):
         release_year=entry['release_year'],
         is_single_from=entry['single_relationship'],
         is_single=entry['is_single'],
+        is_soundtrack=entry['is_soundtrack'],
+        is_main_album=entry['is_main_album'],
         recording_score=entry['recording_score']
     )
 
@@ -93,6 +94,8 @@ def search(cursor, search_artist: str, search_title: str) -> Song:
            mb_album.title as album_title,
            mb_album.release_year,
            mb_album.is_single,
+           mb_album.is_soundtrack,
+           mb_album.is_main_album,
            mb_album.mb_id as album_mb_id,
            mb_artist.name,
            mb_artist.mb_id as artist_mb_id,
@@ -113,7 +116,7 @@ def search(cursor, search_artist: str, search_title: str) -> Song:
        songs = [song_from_result(entry) for entry in query(cursor, recordings_query)]
 
     if len(songs):
-        min_relevance = max([song.relevance_for_query(search_title) for song in songs]) / 2
+        min_relevance = max([song.relevance_for_query(search_title) for song in songs]) / 10
         best_match = max(
             [song for song in songs if song.relevance_for_query(search_title) >= min_relevance],
             key=lambda song: (-song.release_year, song.relevance_for_query(search_title))
@@ -170,8 +173,6 @@ def process_song(cursor, row):
     print("DB: {}".format(album_db))
     if song is not None:
         album_title = clean(song.album_title)
-        if song.is_single:
-            album_title += " (single)"
         album_mb = "{} {} ({})".format(song.album_mb_id, album_title, song.release_year)
         if album_db == album_mb:
             print("MB: ok")
