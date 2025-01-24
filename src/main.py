@@ -28,10 +28,10 @@ class Entry:
         return self.release_type == 1 and not self.release_secondary_types
 
     def is_compilation_album(self):
-        return self.release_type == 1 and 1 in self.release_secondary_types
+        return self.release_type == 1 and self.release_secondary_types and 1 in self.release_secondary_types
 
     def is_soundtrack_album(self):
-        return self.release_type == 1 and 2 in self.release_secondary_types
+        return self.release_type == 1 and self.release_secondary_types and 2 in self.release_secondary_types
 
     def is_exact_match(self, query):
         return search_key(self.title) == search_key(query)
@@ -52,9 +52,9 @@ class Entry:
         else:
             year_value = self.release_year + 1
 
-        reference_priorty = 1
+        reference_priority = 1
         if self.is_single_from:
-            reference_priorty = 0
+            reference_priority = 0
 
         if self.is_main_album():
             type_priority = 1
@@ -67,7 +67,7 @@ class Entry:
         else:
             type_priority = 4
 
-        return (year_value, reference_priorty, type_priority)
+        return (year_value, reference_priority, type_priority)
 
 
 def process_artist(cursor, artist_id: int, args):
@@ -211,12 +211,24 @@ def process_artist(cursor, artist_id: int, args):
         else:
             is_single = 'FALSE'
 
-        album_values[best_match.release_group_id] = "({}, '{}', '{}', {}, {})".format(
+        if best_match.is_soundtrack_album():
+            is_soundtrack = 'TRUE'
+        else:
+            is_soundtrack = 'FALSE'
+
+        if best_match.is_main_album():
+            is_main_album = 'TRUE'
+        else:
+            is_main_album = 'FALSE'
+
+        album_values[best_match.release_group_id] = "({}, '{}', '{}', {}, {}, {}, {})".format(
             best_match.release_group_id,
             best_match.release_group_mb_id,
             best_match.release_group_name.replace("'", "''"),
             best_match.release_group_year,
-            is_single
+            is_soundtrack,
+            is_single,
+            is_main_album
         )
 
         song_values[best_match.recording_id] = "({}, '{}', '{}', {}, {}, {}, {})".format(
@@ -231,13 +243,15 @@ def process_artist(cursor, artist_id: int, args):
 
     if len(album_values):
         insert_album = """
-            INSERT INTO "musicbrainz_export"."mb_album" (id, mb_id, title, release_year, is_single)
+            INSERT INTO "musicbrainz_export"."mb_album" (id, mb_id, title, release_year, is_soundtrack, is_single, is_main_album)
             VALUES {}
             ON CONFLICT(id) DO UPDATE SET
              mb_id = EXCLUDED.mb_id, 
              title = EXCLUDED.title, 
              release_year = EXCLUDED.release_year,
-             is_single = EXCLUDED.is_single;
+             is_single = EXCLUDED.is_single,
+             is_soundtrack = EXCLUDED.is_soundtrack,
+             is_main_album = EXCLUDED.is_main_album;
         """.format(", ".join(album_values.values()))
         cursor.execute(insert_album)
 

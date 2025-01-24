@@ -19,11 +19,13 @@ CREATE INDEX "idx_mb_artist_alias_alias" ON "musicbrainz_export"."mb_artist_alia
 
 CREATE TABLE "musicbrainz_export"."mb_album"
 (
-    "id"           int PRIMARY KEY,
-    "mb_id"        uuid,
-    "title"        varchar,
-    "release_year" int,
-    "is_single"    boolean
+    "id"            int PRIMARY KEY,
+    "mb_id"         uuid,
+    "title"         varchar,
+    "release_year"  int,
+    "is_soundtrack" boolean,
+    "is_single"     boolean,
+    "is_main_album" boolean
 );
 
 CREATE TABLE "musicbrainz_export"."mb_song"
