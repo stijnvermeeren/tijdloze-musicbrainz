@@ -66,26 +66,33 @@ def song_from_result(entry):
         recording_score=entry['recording_score']
     )
 
+def search_artist(cursor, search_artist) -> list[int]:
+    artist_query = """
+        SELECT DISTINCT
+           mb_artist.id
+        FROM "mb_artist"
+        JOIN "mb_artist_alias" ON "mb_artist"."id" = "mb_artist_alias"."artist_id"
+        WHERE 
+            LENGTH("mb_artist_alias"."alias") < 255 
+            AND levenshtein_less_equal("mb_artist_alias"."alias", '{}', 1) < 2
+    """.format(search_key(search_artist))
+    return [entry['id'] for entry in query(cursor, artist_query)]
 
-def search(cursor, search_artist: str, search_title: str) -> Song:
-    where = """
-    ("mb_song_alias"."alias" LIKE '{}%') AND (
-        LENGTH("mb_artist_alias"."alias") < 255 
-        AND levenshtein_less_equal("mb_artist_alias"."alias", '{}', 1) < 2
-    )
-    """.format(search_key(search_title), search_key(search_artist))
+def search_songs(cursor, artist_ids: list[int], search_title: str, second_artist_ids: list[int]=None) -> Song:
+    where = """("mb_song_alias"."alias" LIKE '{}%')""".format(search_key(search_title))
 
-    where2 = """
-    (
-        LENGTH("mb_song_alias"."alias") < 255 AND levenshtein_less_equal("mb_song_alias"."alias", '{}', 1) < 2
-    ) AND (
-        LENGTH("mb_artist_alias"."alias") < 255 
-        AND levenshtein_less_equal("mb_artist_alias"."alias", '{}', 1) < 2
-    )
-    """.format(search_key(search_title), search_key(search_artist))
+    where2 = """(
+        LENGTH("mb_song_alias"."alias") < 255 
+        AND
+        levenshtein_less_equal("mb_song_alias"."alias", '{}', 1) < 2
+    )""".format(search_key(search_title))
+
+    artist_where = f'"mb_artist"."id" IN ({", ".join([str(id) for id in artist_ids])})'
+    if second_artist_ids:
+        artist_where += f' AND second_artist."id" IN ({", ".join([str(id) for id in second_artist_ids])})'
 
     recordings_query_template = """
-        SELECT
+        SELECT DISTINCT
            mb_song.mb_id as song_mb_id,
            mb_song_alias.alias as matched_alias,
            mb_song.title,
@@ -104,15 +111,15 @@ def search(cursor, search_artist: str, search_title: str) -> Song:
         JOIN "mb_song_alias" ON "mb_song"."id" = "mb_song_alias"."song_id"
         JOIN "mb_album" ON "mb_album"."id" = "mb_song"."album_id"
         JOIN "mb_artist" ON "mb_artist"."id" = "mb_song"."artist_id"
-        JOIN "mb_artist_alias" ON "mb_artist"."id" = "mb_artist_alias"."artist_id"
-        WHERE {}
+        LEFT JOIN "mb_artist" as second_artist ON second_artist."id" = "mb_song"."second_artist_id"        
+        WHERE {} AND {}
     """
 
-    recordings_query = recordings_query_template.format(where)
+    recordings_query = recordings_query_template.format(where, artist_where)
     songs = [song_from_result(entry) for entry in query(cursor, recordings_query)]
 
     if not len(songs):
-       recordings_query = recordings_query_template.format(where2)
+       recordings_query = recordings_query_template.format(where2, artist_where)
        songs = [song_from_result(entry) for entry in query(cursor, recordings_query)]
 
     if len(songs):
@@ -154,10 +161,24 @@ def process_song(cursor, row):
     print()
     print("{} - {}".format(artist_name, title))
 
-    song = search(cursor, artist_name, title)
-
     artist_db = "{} {} ({})".format(row["artist_musicbrainz_id"], row["artist_name"], row["artist_country_id"])
     print("DB: {}".format(artist_db))
+
+    song = None
+
+    artist_ids = search_artist(cursor, artist_name)
+    if len(artist_ids):
+        song = search_songs(cursor, artist_ids, title)
+    else:
+        # try with second artist
+        # TODO make splitting more flexible
+        split = artist_name.split("&")
+        main_artist_name = split[0]
+        second_artist_name = "&".join(split[1:])
+        main_artist_ids = search_artist(cursor, main_artist_name)
+        second_artist_ids = search_artist(cursor, second_artist_name)
+        song = search_songs(cursor, main_artist_ids, title, second_artist_ids=second_artist_ids)
+
     if song is not None:
         artist_mb = "{} {} ({})".format(
             song.artist_mb_id,
