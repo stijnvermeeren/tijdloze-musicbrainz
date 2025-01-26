@@ -14,6 +14,7 @@ class Entry:
     title: str
     recording_id: int
     recording_mb_id: str
+    second_artist_id: int
     release_group_id: int
     release_group_mb_id: str
     release_group_name: str
@@ -108,7 +109,13 @@ def process_artist(cursor, artist_id: int, args):
             "recording"."id" as recording_id,
             "recording"."gid" as recording_mb_id,
             "recording"."name" as recording_name,
-            (SELECT COUNT(*) FROM "release" r2 JOIN "medium" m2 ON m2."release" = r2."id" JOIN "track" t2 ON t2."medium" = m2."id" WHERE t2."recording" = "recording"."id") as recording_score
+            (SELECT COUNT(*) FROM "release" r2 JOIN "medium" m2 ON m2."release" = r2."id" JOIN "track" t2 ON t2."medium" = m2."id" WHERE t2."recording" = "recording"."id") as recording_score,
+            (
+              select artist 
+              from "artist_credit_name" 
+              where "recording"."artist_credit" = "artist_credit_name"."artist_credit"
+              and "artist_credit_name"."position" = 1
+            ) as second_artist_id
         FROM "musicbrainz"."recording"
         JOIN "musicbrainz"."track" ON "recording"."id" = "track"."recording"
         JOIN "musicbrainz"."medium" ON "track"."medium" = "medium"."id" 
@@ -140,7 +147,13 @@ def process_artist(cursor, artist_id: int, args):
             "recording"."id" as recording_id,
             "recording"."gid" as recording_mb_id,
             "recording"."name" as recording_name,
-            (SELECT COUNT(*) FROM "release" r2 JOIN "medium" m2 ON m2."release" = r2."id" JOIN "track" t2 ON t2."medium" = m2."id" WHERE t2."recording" = "recording"."id") as recording_score
+            (SELECT COUNT(*) FROM "release" r2 JOIN "medium" m2 ON m2."release" = r2."id" JOIN "track" t2 ON t2."medium" = m2."id" WHERE t2."recording" = "recording"."id") as recording_score,
+            (
+              select artist 
+              from "artist_credit_name" 
+              where "recording"."artist_credit" = "artist_credit_name"."artist_credit"
+              and "artist_credit_name"."position" = 1
+            ) as second_artist_id
         FROM "musicbrainz"."recording"
         JOIN "musicbrainz"."track" ON "recording"."id" = "track"."recording"
         JOIN "musicbrainz"."medium" ON "track"."medium" = "medium"."id" 
@@ -169,6 +182,7 @@ def process_artist(cursor, artist_id: int, args):
             title=title,
             recording_id=entry['recording_id'],
             recording_mb_id=entry['recording_mb_id'],
+            second_artist_id=entry['second_artist_id'],
             release_group_id=entry['release_group_id'],
             release_group_mb_id=release_group_mb_id,
             release_group_name=entry['release_group_name'],
@@ -231,11 +245,12 @@ def process_artist(cursor, artist_id: int, args):
             is_main_album
         )
 
-        song_values[best_match.recording_id] = "({}, '{}', '{}', {}, {}, {}, {})".format(
+        song_values[best_match.recording_id] = "({}, '{}', '{}', {}, {}, {}, {}, {})".format(
             best_match.recording_id,
             best_match.recording_mb_id,
             best_match.title.replace("'", "''"),
             artist_id,
+            best_match.second_artist_id or "NULL",
             best_match.release_group_id,
             best_match.is_single_from,
             best_match.recording_score
@@ -257,12 +272,13 @@ def process_artist(cursor, artist_id: int, args):
 
     if len(song_values):
         insert_song = """
-            INSERT INTO "musicbrainz_export"."mb_song" (id, mb_id, title, artist_id, album_id, is_single, score)
+            INSERT INTO "musicbrainz_export"."mb_song" (id, mb_id, title, artist_id, second_artist_id, album_id, is_single, score)
             VALUES {}
             ON CONFLICT(id) DO UPDATE SET
              mb_id = EXCLUDED.mb_id,
              title = EXCLUDED.title, 
              artist_id = EXCLUDED.artist_id,
+             second_artist_id = EXCLUDED.second_artist_id,
              album_id = EXCLUDED.album_id,
              is_single = EXCLUDED.is_single,
              score = EXCLUDED.score;

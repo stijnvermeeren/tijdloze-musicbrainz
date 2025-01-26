@@ -34,6 +34,7 @@ CREATE TABLE "musicbrainz_export"."mb_song"
     "mb_id"     uuid,
     "title"     varchar,
     "artist_id" int,
+    "second_artist_id" int,
     "album_id"  int,
     "is_single" boolean,
     "score"     int
