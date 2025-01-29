@@ -205,9 +205,25 @@ Executing the query will take ca. 12 minutes using the recommended EC2 instance.
 ```bash
 pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_artist musicbrainz_db > mb_artist.dump
 pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_artist_alias musicbrainz_db > mb_artist_alias.dump
-pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_album musicbrainz_db > mb_artist.dump
+pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_album musicbrainz_db > mb_album.dump
 pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_song musicbrainz_db > mb_song.dump
 pg_dump -U musicbrainz -h ec2-....compute.amazonaws.com --format=c -t musicbrainz_export.mb_song_alias musicbrainz_db > mb_song_alias.dump
+```
+
+### Load the tables into a different Postgres database
+
+Assuming
+- the database is named `tijdloze` and already has a schema named `musicbrainz_export`
+- the host is `127.0.0.1`
+- the role for the import is `postgres`, with password authentication
+- the role that should own the tables is `tijdloze`
+
+```bash
+pg_restore -h 127.0.0.1 -d tijdloze -U postgres -W --no-owner --role=tijdloze < mb_artist.dump
+pg_restore -h 127.0.0.1 -d tijdloze -U postgres -W --no-owner --role=tijdloze < mb_artist_alias.dump
+pg_restore -h 127.0.0.1 -d tijdloze -U postgres -W --no-owner --role=tijdloze < mb_album.dump
+pg_restore -h 127.0.0.1 -d tijdloze -U postgres -W --no-owner --role=tijdloze < mb_song.dump
+pg_restore -h 127.0.0.1 -d tijdloze -U postgres -W --no-owner --role=tijdloze < mb_song_alias.dump
 ```
 
 ## Query for creating benchmarking dataset

@@ -79,6 +79,9 @@ def search_artist(cursor, search_artist) -> list[int]:
     return [entry['id'] for entry in query(cursor, artist_query)]
 
 def search_songs(cursor, artist_ids: list[int], search_title: str, second_artist_ids: list[int]=None) -> Song:
+    if len(artist_ids) == 0:
+        return None
+
     where = """("mb_song_alias"."alias" LIKE '{}%')""".format(search_key(search_title))
 
     where2 = """(
