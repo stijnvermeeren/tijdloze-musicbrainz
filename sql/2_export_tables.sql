@@ -32,11 +32,13 @@ CREATE TABLE "musicbrainz_export"."mb_song"
 (
     "id"        int PRIMARY KEY,
     "mb_id"     uuid,
+    "mb_work_id" uuid,
     "title"     varchar,
     "artist_id" int,
     "second_artist_id" int,
     "album_id"  int,
     "is_single" boolean,
+    "language"  varchar,
     "score"     int
 );
 

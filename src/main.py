@@ -14,6 +14,7 @@ class Entry:
     title: str
     recording_id: int
     recording_mb_id: str
+    work_mb_id: str
     second_artist_id: int
     release_group_id: int
     release_group_mb_id: str
@@ -23,6 +24,7 @@ class Entry:
     release_year: int
     release_group_year: int
     is_single_from: int
+    language: str
     recording_score: int
 
     def is_main_album(self):
@@ -182,6 +184,7 @@ def process_artist(cursor, artist_id: int, args):
             title=title,
             recording_id=entry['recording_id'],
             recording_mb_id=entry['recording_mb_id'],
+            work_mb_id='',
             second_artist_id=entry['second_artist_id'],
             release_group_id=entry['release_group_id'],
             release_group_mb_id=release_group_mb_id,
@@ -191,6 +194,7 @@ def process_artist(cursor, artist_id: int, args):
             release_year=entry['release_year'],
             release_group_year=entry['release_group_year'],
             is_single_from=is_single_from,
+            language='',
             recording_score=entry['recording_score']
         )
 
@@ -245,14 +249,35 @@ def process_artist(cursor, artist_id: int, args):
             is_main_album
         )
 
-        song_values[best_match.recording_id] = "({}, '{}', '{}', {}, {}, {}, {}, {})".format(
+        work_query = """
+            select
+               "work"."gid" as "work_mb_id", 
+               "language"."iso_code_1" as "language" 
+            from "musicbrainz"."l_recording_work"
+            left join "musicbrainz"."work" ON "work"."id" = "l_recording_work"."entity1"
+            left join "musicbrainz"."work_language" on "work"."id" = "work_language"."work" 
+            left join "musicbrainz"."language" on "language"."id" = "work_language"."language" and "language".iso_code_1 is not NULL
+            where "l_recording_work"."entity0" = {} and "l_recording_work"."link_order" <= 1
+            order by "l_recording_work"."link_order"
+            limit 1
+        """.format(best_match.recording_id)
+        language = 'NULL'
+        work_mb_id = 'NULL'
+        for entry in query(cursor, work_query):
+            work_mb_id = "'{}'".format(entry["work_mb_id"])
+            if entry["language"]:
+                language = "'{}'".format(entry["language"])
+
+        song_values[best_match.recording_id] = "({}, '{}', {}, '{}', {}, {}, {}, {}, {}, {})".format(
             best_match.recording_id,
             best_match.recording_mb_id,
+            work_mb_id,
             best_match.title.replace("'", "''"),
             artist_id,
             best_match.second_artist_id or "NULL",
             best_match.release_group_id,
             best_match.is_single_from,
+            language,
             best_match.recording_score
         )
 
@@ -272,15 +297,19 @@ def process_artist(cursor, artist_id: int, args):
 
     if len(song_values):
         insert_song = """
-            INSERT INTO "musicbrainz_export"."mb_song" (id, mb_id, title, artist_id, second_artist_id, album_id, is_single, score)
+            INSERT INTO "musicbrainz_export"."mb_song" (
+              id, mb_id, mb_work_id, title, artist_id, second_artist_id, album_id, is_single, language, score
+            )
             VALUES {}
             ON CONFLICT(id) DO UPDATE SET
              mb_id = EXCLUDED.mb_id,
+             mb_work_id = EXCLUDED.mb_work_id,
              title = EXCLUDED.title, 
              artist_id = EXCLUDED.artist_id,
              second_artist_id = EXCLUDED.second_artist_id,
              album_id = EXCLUDED.album_id,
              is_single = EXCLUDED.is_single,
+             language = EXCLUDED.language,
              score = EXCLUDED.score;
         """.format(", ".join(song_values.values()))
         cursor.execute(insert_song)
