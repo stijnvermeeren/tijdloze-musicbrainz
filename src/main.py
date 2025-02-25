@@ -117,7 +117,15 @@ def process_artist(cursor, artist_id: int, args):
               from "artist_credit_name" 
               where "recording"."artist_credit" = "artist_credit_name"."artist_credit"
               and "artist_credit_name"."position" = 1
-            ) as second_artist_id
+            ) as second_artist_id,
+            (
+              select "language"."iso_code_1" 
+              from "musicbrainz"."language" 
+              left join "musicbrainz"."work_language" on "language"."id" = "work_language"."language" 
+              where "work"."id" = "work_language"."work" and "language"."iso_code_1" is not NULL
+              limit 1
+            ) as language,
+            "work"."gid" as "work_mb_id"
         FROM "musicbrainz"."recording"
         JOIN "musicbrainz"."track" ON "recording"."id" = "track"."recording"
         JOIN "musicbrainz"."medium" ON "track"."medium" = "medium"."id" 
@@ -128,8 +136,10 @@ def process_artist(cursor, artist_id: int, args):
         JOIN "musicbrainz"."artist_credit_name" AS artist_credit_name_rg ON artist_credit_name_rg."artist_credit" = artist_credit_rg."id"
         JOIN "musicbrainz"."artist_credit" ON "artist_credit".id = "recording"."artist_credit"
         JOIN "musicbrainz"."artist_credit_name" ON "artist_credit_name"."artist_credit" = "artist_credit"."id" AND "artist_credit_name"."position" = 0
+        left join "musicbrainz"."l_recording_work" ON "l_recording_work"."entity0" = "recording"."id" and "l_recording_work"."link_order" <= 1
+        left join "musicbrainz"."work" ON "work"."id" = "l_recording_work"."entity1"
         WHERE "artist_credit_name"."artist" = {} AND "release"."status" = 1 AND artist_credit_name_rg.artist = artist_credit_name.artist -- official
-        GROUP BY recording.id, release_group.id
+        GROUP BY recording.id, release_group.id, work.id
     """.format(artist_id)
 
     recordings_query_soundtrack = """
@@ -155,7 +165,15 @@ def process_artist(cursor, artist_id: int, args):
               from "artist_credit_name" 
               where "recording"."artist_credit" = "artist_credit_name"."artist_credit"
               and "artist_credit_name"."position" = 1
-            ) as second_artist_id
+            ) as second_artist_id,
+            (
+              select "language"."iso_code_1"
+              from "musicbrainz"."language" 
+              left join "musicbrainz"."work_language" on "language"."id" = "work_language"."language" 
+              where "work"."id" = "work_language"."work" and "language"."iso_code_1" is not NULL
+              limit 1
+            ) as language,
+            "work"."gid" as "work_mb_id"
         FROM "musicbrainz"."recording"
         JOIN "musicbrainz"."track" ON "recording"."id" = "track"."recording"
         JOIN "musicbrainz"."medium" ON "track"."medium" = "medium"."id" 
@@ -165,8 +183,10 @@ def process_artist(cursor, artist_id: int, args):
         JOIN "musicbrainz"."artist_credit" ON "artist_credit".id = "recording"."artist_credit"
         JOIN "musicbrainz"."artist_credit_name" ON "artist_credit_name"."artist_credit" = "artist_credit"."id" AND "artist_credit_name"."position" = 0
         JOIN "musicbrainz"."release_group_secondary_type_join" ON "release_group_secondary_type_join"."release_group" = "release_group"."id"
+        left join "musicbrainz"."l_recording_work" ON "l_recording_work"."entity0" = "recording"."id" and "l_recording_work"."link_order" <= 1
+        left join "musicbrainz"."work" ON "work"."id" = "l_recording_work"."entity1"
         WHERE "artist_credit_name"."artist" = {} AND "release"."status" = 1 AND "release_group_secondary_type_join"."secondary_type" = 2
-        GROUP BY recording.id, release_group.id
+        GROUP BY recording.id, release_group.id, work.id
     """.format(artist_id)
 
     songs = {}
@@ -184,7 +204,7 @@ def process_artist(cursor, artist_id: int, args):
             title=title,
             recording_id=entry['recording_id'],
             recording_mb_id=entry['recording_mb_id'],
-            work_mb_id='',
+            work_mb_id=entry['work_mb_id'],
             second_artist_id=entry['second_artist_id'],
             release_group_id=entry['release_group_id'],
             release_group_mb_id=release_group_mb_id,
@@ -194,7 +214,7 @@ def process_artist(cursor, artist_id: int, args):
             release_year=entry['release_year'],
             release_group_year=entry['release_group_year'],
             is_single_from=is_single_from,
-            language='',
+            language=entry['language'],
             recording_score=entry['recording_score']
         )
 
@@ -249,24 +269,12 @@ def process_artist(cursor, artist_id: int, args):
             is_main_album
         )
 
-        work_query = """
-            select
-               "work"."gid" as "work_mb_id", 
-               "language"."iso_code_1" as "language" 
-            from "musicbrainz"."l_recording_work"
-            left join "musicbrainz"."work" ON "work"."id" = "l_recording_work"."entity1"
-            left join "musicbrainz"."work_language" on "work"."id" = "work_language"."work" 
-            left join "musicbrainz"."language" on "language"."id" = "work_language"."language" and "language".iso_code_1 is not NULL
-            where "l_recording_work"."entity0" = {} and "l_recording_work"."link_order" <= 1
-            order by "l_recording_work"."link_order"
-            limit 1
-        """.format(best_match.recording_id)
         language = 'NULL'
         work_mb_id = 'NULL'
-        for entry in query(cursor, work_query):
-            work_mb_id = "'{}'".format(entry["work_mb_id"])
-            if entry["language"]:
-                language = "'{}'".format(entry["language"])
+        if best_match.work_mb_id:
+            work_mb_id = "'{}'".format(best_match.work_mb_id)
+        if best_match.language:
+            language = "'{}'".format(best_match.language)
 
         song_values[best_match.recording_id] = "({}, '{}', {}, '{}', {}, {}, {}, {}, {}, {})".format(
             best_match.recording_id,
