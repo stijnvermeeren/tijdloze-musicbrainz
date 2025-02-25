@@ -119,10 +119,11 @@ def process_artist(cursor, artist_id: int, args):
               and "artist_credit_name"."position" = 1
             ) as second_artist_id,
             (
-              select "language"."iso_code_1" 
+              select COALESCE("language"."iso_code_1", "language"."iso_code_3") 
               from "musicbrainz"."language" 
               left join "musicbrainz"."work_language" on "language"."id" = "work_language"."language" 
-              where "work"."id" = "work_language"."work" and "language"."iso_code_1" is not NULL
+              where "work"."id" = "work_language"."work" 
+              and ("language"."iso_code_1" is not NULL OR "language"."iso_code_3" = 'zxx')
               limit 1
             ) as language,
             "work"."gid" as "work_mb_id"
@@ -167,10 +168,11 @@ def process_artist(cursor, artist_id: int, args):
               and "artist_credit_name"."position" = 1
             ) as second_artist_id,
             (
-              select "language"."iso_code_1"
+              select COALESCE("language"."iso_code_1", "language"."iso_code_3") 
               from "musicbrainz"."language" 
               left join "musicbrainz"."work_language" on "language"."id" = "work_language"."language" 
-              where "work"."id" = "work_language"."work" and "language"."iso_code_1" is not NULL
+              where "work"."id" = "work_language"."work" 
+              and ("language"."iso_code_1" is not NULL OR "language"."iso_code_3" = 'zxx')
               limit 1
             ) as language,
             "work"."gid" as "work_mb_id"
