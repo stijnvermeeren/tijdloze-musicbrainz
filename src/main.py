@@ -152,6 +152,10 @@ def process_artist(cursor, artist_id: int, args):
                 join "artist" on "artist"."id" = "l_artist_recording"."entity0"
                 where "l_artist_recording"."entity1" = "recording"."id"
                 and "link"."link_type" = 149  -- vocals
+                and not exists (
+                    select 1 from "link_attribute" 
+                    where "link_attribute"."link" = "link"."id" and "link_attribute"."attribute_type" = 12  -- background
+                )
             ) as "lead_vocals_3"
     """
 
@@ -219,7 +223,8 @@ def process_artist(cursor, artist_id: int, args):
             elif 2 in lead_vocals_2:
                 lead_vocals = "f"
             else:
-                # PRIO 3: if any vocals are defined for the recording, use the gender(s) of the associated person/people
+                # PRIO 3: if any non-background vocals are defined for the recording, use the gender(s) of the
+                # associated person/people
                 lead_vocals_3 = set(entry['lead_vocals_3'] or [])
                 if 1 in lead_vocals_3 and 2 in lead_vocals_3:
                     lead_vocals = "x"
