@@ -53,12 +53,12 @@ def song_from_result(entry):
     return Song(
         title=entry['title'],
         matched_alias=entry['matched_alias'],
-        song_mb_id=entry['song_mb_id'],
+        song_mb_id=str(entry['song_mb_id']),
         artist=entry['name'],
-        artist_mb_id=entry['artist_mb_id'],
+        artist_mb_id=str(entry['artist_mb_id']),
         country_id=entry['country_id'],
         album_title=entry['album_title'],
-        album_mb_id=entry['album_mb_id'],
+        album_mb_id=str(entry['album_mb_id']),
         release_year=entry['release_year'],
         is_single_from=entry['single_relationship'],
         is_single=entry['is_single'],
@@ -169,8 +169,6 @@ def process_song(cursor, row):
 
     artist_db = "{} {} ({})".format(row["artist_musicbrainz_id"], row["artist_name"], row["artist_country_id"])
     print("DB: {}".format(artist_db))
-
-    song = None
 
     artist_ids = search_artist(cursor, artist_name)
     if len(artist_ids):
