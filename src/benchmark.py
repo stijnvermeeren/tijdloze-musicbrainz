@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 from util import query, search_key
 import os
-import psycopg2
+import psycopg
+from psycopg.sql import SQL, Literal
 import csv
 import dataclasses
 from dotenv import load_dotenv
@@ -82,17 +83,19 @@ def search_songs(cursor, artist_ids: list[int], search_title: str, second_artist
     if len(artist_ids) == 0:
         return None
 
-    where = """("mb_song_alias"."alias" LIKE '{}%')""".format(search_key(search_title))
+    where = SQL("""("mb_song_alias"."alias" LIKE {})""").format(Literal(search_key(search_title) + '%')).as_string()
 
-    where2 = """(
+    where2 = SQL("""(
         LENGTH("mb_song_alias"."alias") < 255 
         AND
-        levenshtein_less_equal("mb_song_alias"."alias", '{}', 1) < 2
-    )""".format(search_key(search_title))
+        levenshtein_less_equal("mb_song_alias"."alias", {}, 1) < 2
+    )""").format(Literal(search_key(search_title))).as_string()
 
     artist_where = f'"mb_artist"."id" IN ({", ".join([str(id) for id in artist_ids])})'
     if second_artist_ids:
-        artist_where += f' AND second_artist."id" IN ({", ".join([str(id) for id in second_artist_ids])})'
+        artist_where += SQL(' AND second_artist."id" IN ({})').format(
+            SQL(',').join(map(Literal, second_artist_ids))
+        ).as_string()
 
     recordings_query_template = """
         SELECT DISTINCT
@@ -225,12 +228,8 @@ try:
 
     results = []
 
-    with psycopg2.connect(
-        host=os.getenv("MB_DB_HOST"),
-        database=os.getenv("MB_DB_NAME"),
-        user=os.getenv("MB_DB_USER"),
-        password=os.getenv("MB_DB_PASSWORD")
-    ) as conn:
+    conn_str = f"""postgresql://{os.getenv("MB_DB_USER")}:{os.getenv("MB_DB_PASSWORD")}@{os.getenv("MB_DB_HOST")}:5432/{os.getenv("MB_DB_NAME")}"""
+    with psycopg.connect(conn_str) as conn:
         with conn.cursor() as cursor:
             cursor.execute("SET search_path = musicbrainz, public, musicbrainz_export;")
             with open('benchmark/default.csv', encoding="utf-8-sig") as csvfile:
@@ -272,5 +271,5 @@ try:
     print(f"Correct: {correct_count} ({(correct_count / total_count):.2%})")
     print(f"Missing: {missing_count} ({(missing_count / total_count):.2%})")
     print(f"Wrong: {wrong_count} ({(wrong_count / total_count):.2%})")
-except psycopg2.DatabaseError as error:
+except psycopg.DatabaseError as error:
     print("Error: {}".format(error))

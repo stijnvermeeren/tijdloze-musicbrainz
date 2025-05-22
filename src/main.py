@@ -2,7 +2,8 @@ from util import query, search_key
 from dotenv import load_dotenv
 
 from tqdm import tqdm
-import psycopg2
+import psycopg
+from psycopg.sql import SQL, Literal
 import dataclasses
 import os
 import argparse
@@ -25,6 +26,7 @@ class Entry:
     release_group_year: int
     is_single_from: int
     language: str
+    lead_vocals: str
     recording_score: int
 
     def is_main_album(self):
@@ -94,8 +96,8 @@ def process_artist(cursor, artist_id: int, args):
             single_from_relations[single_title] = set()
         single_from_relations[single_title].add(entry['album_id'])
 
-    recordings_query = """
-        SELECT
+    select = """
+            SELECT
             release_group.id as release_group_id, 
             release_group.gid as release_group_mb_id, 
             release_group.name as release_group_name,
@@ -126,7 +128,34 @@ def process_artist(cursor, artist_id: int, args):
               and ("language"."iso_code_1" is not NULL OR "language"."iso_code_3" = 'zxx')
               limit 1
             ) as language,
-            "work"."gid" as "work_mb_id"
+            "work"."gid" as "work_mb_id",
+            (
+                select array_agg("artist"."gender")
+                from "artist" 
+                join "artist_credit_name" on "artist"."id" = "artist_credit_name"."artist"
+                where "recording"."artist_credit" = "artist_credit_name"."artist_credit"
+            ) as "lead_vocals_1",
+            (
+                select array_agg("artist"."gender")
+                from "l_artist_recording"
+                join "link" on "link"."id" = "l_artist_recording"."link"
+                join "link_attribute" on "link_attribute"."link" = "link"."id"
+                join "artist" on "artist"."id" = "l_artist_recording"."entity0"
+                where "l_artist_recording"."entity1" = "recording"."id"
+                and "link"."link_type" = 149  -- vocals
+                and "link_attribute"."attribute_type" = 4  -- lead
+            ) as "lead_vocals_2",
+            (
+                select array_agg("artist"."gender")
+                from "l_artist_recording"
+                join "link" on "link"."id" = "l_artist_recording"."link"
+                join "artist" on "artist"."id" = "l_artist_recording"."entity0"
+                where "l_artist_recording"."entity1" = "recording"."id"
+                and "link"."link_type" = 149  -- vocals
+            ) as "lead_vocals_3"
+    """
+
+    recordings_query = select + SQL("""
         FROM "musicbrainz"."recording"
         JOIN "musicbrainz"."track" ON "recording"."id" = "track"."recording"
         JOIN "musicbrainz"."medium" ON "track"."medium" = "medium"."id" 
@@ -139,43 +168,11 @@ def process_artist(cursor, artist_id: int, args):
         JOIN "musicbrainz"."artist_credit_name" ON "artist_credit_name"."artist_credit" = "artist_credit"."id" AND "artist_credit_name"."position" = 0
         left join "musicbrainz"."l_recording_work" ON "l_recording_work"."entity0" = "recording"."id" and "l_recording_work"."link_order" <= 1
         left join "musicbrainz"."work" ON "work"."id" = "l_recording_work"."entity1"
-        WHERE "artist_credit_name"."artist" = {} AND "release"."status" = 1 AND artist_credit_name_rg.artist = artist_credit_name.artist -- official
+        WHERE "artist_credit_name"."artist" = {artist_id} AND "release"."status" = 1 AND artist_credit_name_rg.artist = artist_credit_name.artist -- official
         GROUP BY recording.id, release_group.id, work.id
-    """.format(artist_id)
+    """).format(artist_id=Literal(artist_id)).as_string()
 
-    recordings_query_soundtrack = """
-        SELECT
-            release_group.id as release_group_id, 
-            release_group.gid as release_group_mb_id, 
-            release_group.name as release_group_name,
-            release_group.type as release_type,
-            MIN(release_country.date_year) as release_year,
-            (
-                SELECT MIN(date_year) 
-                FROM "release_country" 
-                JOIN "release" release2 ON release_country.release = release2.id 
-                WHERE release2."release_group" = "release_group".id
-            ) as release_group_year,
-            (SELECT array_agg(secondary_type) FROM release_group_secondary_type_join WHERE release_group_secondary_type_join.release_group = release_group.id) as secondary_types,
-            "recording"."id" as recording_id,
-            "recording"."gid" as recording_mb_id,
-            "recording"."name" as recording_name,
-            (SELECT COUNT(*) FROM "release" r2 JOIN "medium" m2 ON m2."release" = r2."id" JOIN "track" t2 ON t2."medium" = m2."id" WHERE t2."recording" = "recording"."id") as recording_score,
-            (
-              select artist 
-              from "artist_credit_name" 
-              where "recording"."artist_credit" = "artist_credit_name"."artist_credit"
-              and "artist_credit_name"."position" = 1
-            ) as second_artist_id,
-            (
-              select COALESCE("language"."iso_code_1", "language"."iso_code_3") 
-              from "musicbrainz"."language" 
-              left join "musicbrainz"."work_language" on "language"."id" = "work_language"."language" 
-              where "work"."id" = "work_language"."work" 
-              and ("language"."iso_code_1" is not NULL OR "language"."iso_code_3" = 'zxx')
-              limit 1
-            ) as language,
-            "work"."gid" as "work_mb_id"
+    recordings_query_soundtrack = select + SQL("""
         FROM "musicbrainz"."recording"
         JOIN "musicbrainz"."track" ON "recording"."id" = "track"."recording"
         JOIN "musicbrainz"."medium" ON "track"."medium" = "medium"."id" 
@@ -187,9 +184,9 @@ def process_artist(cursor, artist_id: int, args):
         JOIN "musicbrainz"."release_group_secondary_type_join" ON "release_group_secondary_type_join"."release_group" = "release_group"."id"
         left join "musicbrainz"."l_recording_work" ON "l_recording_work"."entity0" = "recording"."id" and "l_recording_work"."link_order" <= 1
         left join "musicbrainz"."work" ON "work"."id" = "l_recording_work"."entity1"
-        WHERE "artist_credit_name"."artist" = {} AND "release"."status" = 1 AND "release_group_secondary_type_join"."secondary_type" = 2
+        WHERE "artist_credit_name"."artist" = {artist_id} AND "release"."status" = 1 AND "release_group_secondary_type_join"."secondary_type" = 2
         GROUP BY recording.id, release_group.id, work.id
-    """.format(artist_id)
+    """).format(artist_id=Literal(artist_id)).as_string()
 
     songs = {}
 
@@ -201,6 +198,38 @@ def process_artist(cursor, artist_id: int, args):
         release_group_mb_id = entry['release_group_mb_id']
         search_key_title = search_key(title)
         is_single_from = search_key_title in single_from_relations and release_group_mb_id in single_from_relations[search_key_title]
+
+        lead_vocals = None
+        is_instrumental = entry['language'] == 'zxx'
+
+        # PRIO 1: if artist is a person, no second artist, and song language is defined (not instrumental): use gender
+        # of artist
+        lead_vocals_1 = set(entry['lead_vocals_1'])
+        if lead_vocals_1 == {1} and not is_instrumental:  # only male
+            lead_vocals = "m"
+        elif lead_vocals_1 == {2} and not is_instrumental:  # only female
+            lead_vocals = "f"
+        else:
+            # PRIO 2: if lead vocals for the recording are defined, use the gender(s) of the associated person/people
+            lead_vocals_2 = set(entry['lead_vocals_2'] or [])
+            if 1 in lead_vocals_2 and 2 in lead_vocals_2:
+                lead_vocals = "x"
+            elif 1 in lead_vocals_2:
+                lead_vocals = "m"
+            elif 2 in lead_vocals_2:
+                lead_vocals = "f"
+            else:
+                # PRIO 3: if any vocals are defined for the recording, use the gender(s) of the associated person/people
+                lead_vocals_3 = set(entry['lead_vocals_3'] or [])
+                if 1 in lead_vocals_3 and 2 in lead_vocals_3:
+                    lead_vocals = "x"
+                elif 1 in lead_vocals_3:
+                    lead_vocals = "m"
+                elif 2 in lead_vocals_3:
+                    lead_vocals = "f"
+                elif is_instrumental:
+                    # PRIO 3: if no song language and no vocals, then set lead vocals to instrumental as well
+                    lead_vocals = "i"
 
         song = Entry(
             title=title,
@@ -217,6 +246,7 @@ def process_artist(cursor, artist_id: int, args):
             release_group_year=entry['release_group_year'],
             is_single_from=is_single_from,
             language=entry['language'],
+            lead_vocals=lead_vocals,
             recording_score=entry['recording_score']
         )
 
@@ -246,50 +276,35 @@ def process_artist(cursor, artist_id: int, args):
                 print()
                 print(best_match)
 
-        if best_match.release_type == 2:
-            is_single = 'TRUE'
-        else:
-            is_single = 'FALSE'
+        album_values[best_match.release_group_id] = SQL("""(
+            {release_group_id}, {release_group_mb_id}, {release_group_name}, {release_group_year}, {is_soundtrack},
+             {is_single}, {is_main_album}
+        )""").format(
+            release_group_id=Literal(best_match.release_group_id),
+            release_group_mb_id=Literal(best_match.release_group_mb_id),
+            release_group_name=Literal(best_match.release_group_name),
+            release_group_year=Literal(best_match.release_group_year),
+            is_soundtrack=Literal(best_match.is_soundtrack_album()),
+            is_single=Literal(best_match.release_type == 2),
+            is_main_album=Literal(best_match.is_main_album())
+        ).as_string()
 
-        if best_match.is_soundtrack_album():
-            is_soundtrack = 'TRUE'
-        else:
-            is_soundtrack = 'FALSE'
-
-        if best_match.is_main_album():
-            is_main_album = 'TRUE'
-        else:
-            is_main_album = 'FALSE'
-
-        album_values[best_match.release_group_id] = "({}, '{}', '{}', {}, {}, {}, {})".format(
-            best_match.release_group_id,
-            best_match.release_group_mb_id,
-            best_match.release_group_name.replace("'", "''"),
-            best_match.release_group_year,
-            is_soundtrack,
-            is_single,
-            is_main_album
-        )
-
-        language = 'NULL'
-        work_mb_id = 'NULL'
-        if best_match.work_mb_id:
-            work_mb_id = "'{}'".format(best_match.work_mb_id)
-        if best_match.language:
-            language = "'{}'".format(best_match.language)
-
-        song_values[best_match.recording_id] = "({}, '{}', {}, '{}', {}, {}, {}, {}, {}, {})".format(
-            best_match.recording_id,
-            best_match.recording_mb_id,
-            work_mb_id,
-            best_match.title.replace("'", "''"),
-            artist_id,
-            best_match.second_artist_id or "NULL",
-            best_match.release_group_id,
-            best_match.is_single_from,
-            language,
-            best_match.recording_score
-        )
+        song_values[best_match.recording_id] = SQL("""(
+            {recording_id}, {recording_mb_id}, {work_mb_id}, {title}, {artist_id},
+            {second_artist_id}, {release_group_id}, {is_single_from}, {language}, {lead_vocals}, {recording_score}
+        )""").format(
+            recording_id=Literal(best_match.recording_id),
+            recording_mb_id=Literal(best_match.recording_mb_id),
+            work_mb_id=Literal(best_match.work_mb_id),
+            title=Literal(best_match.title),
+            artist_id=Literal(artist_id),
+            second_artist_id=Literal(best_match.second_artist_id),
+            release_group_id=Literal(best_match.release_group_id),
+            is_single_from=Literal(best_match.is_single_from),
+            language=Literal(best_match.language),
+            lead_vocals=Literal(best_match.lead_vocals),
+            recording_score=Literal(best_match.recording_score)
+        ).as_string()
 
     if len(album_values):
         insert_album = """
@@ -308,7 +323,7 @@ def process_artist(cursor, artist_id: int, args):
     if len(song_values):
         insert_song = """
             INSERT INTO "musicbrainz_export"."mb_song" (
-              id, mb_id, mb_work_id, title, artist_id, second_artist_id, album_id, is_single, language, score
+              id, mb_id, mb_work_id, title, artist_id, second_artist_id, album_id, is_single, language, lead_vocals, score
             )
             VALUES {}
             ON CONFLICT(id) DO UPDATE SET
@@ -320,6 +335,7 @@ def process_artist(cursor, artist_id: int, args):
              album_id = EXCLUDED.album_id,
              is_single = EXCLUDED.is_single,
              language = EXCLUDED.language,
+             lead_vocals = EXCLUDED.lead_vocals,
              score = EXCLUDED.score;
         """.format(", ".join(song_values.values()))
         cursor.execute(insert_song)
@@ -332,12 +348,8 @@ try:
     parser.add_argument("--recording_id")
     args=parser.parse_args()
 
-    with psycopg2.connect(
-            host=os.getenv("MB_DB_HOST"),
-            database=os.getenv("MB_DB_NAME"),
-            user=os.getenv("MB_DB_USER"),
-            password=os.getenv("MB_DB_PASSWORD")
-    ) as conn:
+    conn_str = f"""postgresql://{os.getenv("MB_DB_USER")}:{os.getenv("MB_DB_PASSWORD")}@{os.getenv("MB_DB_HOST")}:5432/{os.getenv("MB_DB_NAME")}"""
+    with psycopg.connect(conn_str) as conn:
         with conn.cursor() as cursor:
             if args.artist_id:
                 where = """WHERE "mb_artist"."id" = {}""".format(args.artist_id)
@@ -355,5 +367,5 @@ try:
                 print(artist)
                 process_artist(cursor, artist['id'], args)
                 conn.commit()
-except psycopg2.DatabaseError as error:
+except psycopg.DatabaseError as error:
     print("Error: {}".format(error))
