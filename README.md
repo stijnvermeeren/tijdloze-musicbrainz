@@ -226,7 +226,19 @@ pg_restore -h 127.0.0.1 -d tijdloze -U postgres -W --no-owner --role=tijdloze < 
 pg_restore -h 127.0.0.1 -d tijdloze -U postgres -W --no-owner --role=tijdloze < mb_song_alias.dump
 ```
 
-## Query for creating benchmarking dataset
+## Benchmarking
+
+The benchmarking script compared the data that can be automatically extracted from the Musicbrainz dataset with the "ground truth" data that comes from the tijdloze.rocks database.
+
+Of the 2954 songs that are in the database (as of the start of 2025), 2909 (98.5%) can be matched with the musicbrainz dataset. Of those that are matched, the current implementation generates the following KPIs for different properties that can be extracted from the Musicbrainz dataset:
+
+|                       | Album      | Country    | Language   | Lead vocals gender |
+|-----------------------|------------|------------|------------|--------------------|
+| Correctly extracted   | 2711 (93%) | 2909 (99%) | 2618 (90%) | 1876 (64%)         |
+| Incorrectly extracted | 198 (7%)   | 35 (1%)    | 17 (1%)    | 106 (4%)           |
+| No value extracted    |            | 2          | 274 (9%)   | 927 (32%)          |
+
+### Query for creating benchmarking dataset
 
 ```postgresql
 SELECT
