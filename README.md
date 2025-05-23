@@ -188,7 +188,7 @@ Execute the `main.py` script:
 python src/main.py
 ```
 
-Executing the script will take ca. 8 hours using the recommended EC2 instance. 
+Executing the script will take ca. 24 hours using the recommended EC2 instance. 
 
 ### Fill table `mb_song_alias`
 
@@ -232,9 +232,20 @@ pg_restore -h 127.0.0.1 -d tijdloze -U postgres -W --no-owner --role=tijdloze < 
 SELECT
   song.id,
   song.title,
-  album.id as "album_id", album.title as "album_title", album.release_year, album.musicbrainz_id,
-  artist.id as "artist_id", artist.name as "artist_name", artist.country_id as "artist_country_id", artist.musicbrainz_id as "artist_musicbrainz_id",
-  artist2.id as "artist2_id", artist2.name as "artist2_name", artist2.country_id as "artist2_country_id", artist2.musicbrainz_id as "artist2_musicbrainz_id"
+  song.language_id,
+  song.lead_vocals_id,
+  album.id as "album_id",
+  album.title as "album_title",
+  album.release_year,
+  album.musicbrainz_id,
+  artist.id as "artist_id",
+  artist.name as "artist_name",
+  artist.country_id as "artist_country_id",
+  artist.musicbrainz_id as "artist_musicbrainz_id",
+  artist2.id as "artist2_id", 
+  artist2.name as "artist2_name", 
+  artist2.country_id as "artist2_country_id", 
+  artist2.musicbrainz_id as "artist2_musicbrainz_id"
 FROM song
   JOIN album ON album.id = song.album_id
   JOIN artist ON artist.id = song.artist_id

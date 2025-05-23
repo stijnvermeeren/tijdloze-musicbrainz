@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from benchmark_property import BenchmarkProperty, Country, LeadVocals, Language, Album
 from util import query, search_key
 import os
 import psycopg
@@ -26,6 +27,8 @@ class Song:
     title: str
     matched_alias: str
     song_mb_id: str
+    language_id: str
+    lead_vocals_id: str
     album_title: str
     album_mb_id: str
     release_year: int
@@ -54,6 +57,8 @@ def song_from_result(entry):
         title=entry['title'],
         matched_alias=entry['matched_alias'],
         song_mb_id=str(entry['song_mb_id']),
+        language_id=entry['language_id'],
+        lead_vocals_id=entry['lead_vocals_id'],
         artist=entry['name'],
         artist_mb_id=str(entry['artist_mb_id']),
         country_id=entry['country_id'],
@@ -102,6 +107,8 @@ def search_songs(cursor, artist_ids: list[int], search_title: str, second_artist
            mb_song.mb_id as song_mb_id,
            mb_song_alias.alias as matched_alias,
            mb_song.title,
+           mb_song.language as language_id,
+           mb_song.lead_vocals as lead_vocals_id,
            mb_song.is_single AS single_relationship,
            mb_song.score AS recording_score,
            mb_album.title as album_title,
@@ -147,16 +154,9 @@ def search_songs(cursor, artist_ids: list[int], search_title: str, second_artist
 
 @dataclass
 class MatchResult:
-    song_id: int
-    title: str
-    artist: str
-    db_album_title: str
-    db_album_year: int
-    db_album_mb_id: str
-    mb_album_title: str
-    mb_album_year: int
-    mb_album_mb_id: str
-    mb_recording_id: str
+    db_data: dict
+    song: Song
+
 
 def process_song(cursor, row):
     if row["artist2_name"]:
@@ -204,19 +204,44 @@ def process_song(cursor, row):
         else:
             print("MB: {}".format(album_mb))
 
-    return MatchResult(
-        song_id=row["id"],
-        artist=row["artist_name"],
-        title=row["title"],
-        db_album_title=row["album_title"],
-        db_album_year=row["release_year"],
-        db_album_mb_id=row["musicbrainz_id"],
-        mb_album_title=song.album_title if song else None,
-        mb_album_year=song.release_year if song else None,
-        mb_album_mb_id=song.album_mb_id if song else None,
-        mb_recording_id=song.song_mb_id if song else None
-    )
+    return MatchResult(row, song)
 
+
+def stats_for_property(results: list[MatchResult], property: BenchmarkProperty):
+    total_count = len(results)
+    missing = [item for item in results if property.mb_property(item.song) is None]
+    wrong = [
+        item for item in results
+        if property.mb_property(item.song) and property.mb_property(item.song) != property.db_property(item.db_data)
+    ]
+    missing_count = len(missing)
+    wrong_count = len(wrong)
+    correct_count = total_count - missing_count - wrong_count
+
+    print()
+    print(f"STATS: {property.title}")
+    print(f"Total: {total_count}")
+    if total_count:
+        print(f"Correct: {correct_count} ({(correct_count / total_count):.2%})")
+        print(f"Missing: {missing_count} ({(missing_count / total_count):.2%})")
+        print(f"Wrong: {wrong_count} ({(wrong_count / total_count):.2%})")
+
+def mistakes_for_property(results: list[MatchResult], property: BenchmarkProperty):
+    missing = [item for item in results if property.mb_property(item.song) is None]
+    wrong = [
+        item for item in results
+        if property.mb_property(item.song) and property.mb_property(item.song) != property.db_property(item.db_data)
+    ]
+
+    print()
+    print(f"MISSING VALUES: {property.title}")
+    for item in missing:
+        property.log(item.db_data, item.song)
+
+    print()
+    print(f"INCORRECT VALUE: {property.title}")
+    for item in wrong:
+        property.log(item.db_data, item.song)
 
 try:
     parser=argparse.ArgumentParser()
@@ -239,35 +264,16 @@ try:
                          continue
                      results.append(process_song(cursor, row))
 
-    total_count = len(results)
-    missing = [item for item in results if item.mb_album_mb_id is None]
-    wrong = [item for item in results if item.mb_album_mb_id and item.mb_album_mb_id != item.db_album_mb_id]
-    missing_count = len(missing)
-    wrong_count = len(wrong)
-    correct_count = total_count - missing_count - wrong_count
+    with_match = [item for item in results if item.song]
 
-    print()
-    print("NO MUSICBRAINZ MATCH:")
-    print()
-    for item in missing:
-        print(f"({item.song_id}) {item.artist} - {item.title}")
-        print(f"  DB: ({item.db_album_mb_id}) {item.db_album_title} ({item.db_album_year})")
-        print()
+    mistakes_for_property(results, Album())
+    mistakes_for_property(with_match, Country())
+    mistakes_for_property(with_match, Language())
+    mistakes_for_property(with_match, LeadVocals())
 
-    print()
-    print("INCORRECT MUSICBRAINZ MATCH:")
-    print()
-    for item in wrong:
-        print(f"({item.song_id}) {item.artist} - {item.title}")
-        print(f"  DB: ({item.db_album_mb_id}) {item.db_album_title} ({item.db_album_year})")
-        print(f"  MB: ({item.mb_album_mb_id}) {item.mb_album_title} ({item.mb_album_year}) [{item.mb_recording_id}]")
-        print()
-
-    print()
-    print("STATS")
-    print(f"Total: {total_count}")
-    print(f"Correct: {correct_count} ({(correct_count / total_count):.2%})")
-    print(f"Missing: {missing_count} ({(missing_count / total_count):.2%})")
-    print(f"Wrong: {wrong_count} ({(wrong_count / total_count):.2%})")
+    stats_for_property(with_match, Country())
+    stats_for_property(with_match, Language())
+    stats_for_property(with_match, LeadVocals())
+    stats_for_property(results, Album())
 except psycopg.DatabaseError as error:
     print("Error: {}".format(error))
