@@ -7,8 +7,16 @@ from psycopg.sql import SQL, Literal
 import dataclasses
 import os
 import argparse
+import logging
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.WARNING,
+    format='%(asctime)s.%(msecs)03d %(levelname)s:\t%(message)s',
+    datefmt='%Y-%m-%d,%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class Entry:
@@ -89,12 +97,14 @@ def process_artist(cursor, artist_id: int, args):
         WHERE "artist_credit_name"."artist" = {} AND "link"."link_type" = 11  -- "single_from"
     """.format(artist_id)
 
+    logger.info("check singles")
     single_from_relations = {}
     for entry in query(cursor, singlesQuery):
         single_title = search_key(entry["title"])
         if single_title not in single_from_relations:
             single_from_relations[single_title] = set()
         single_from_relations[single_title].add(entry['album_id'])
+    logger.info("singles loaded")
 
     select = """
             SELECT
@@ -131,12 +141,6 @@ def process_artist(cursor, artist_id: int, args):
             "work"."gid" as "work_mb_id",
             (
                 select array_agg("artist"."gender")
-                from "artist" 
-                join "artist_credit_name" on "artist"."id" = "artist_credit_name"."artist"
-                where "recording"."artist_credit" = "artist_credit_name"."artist_credit"
-            ) as "lead_vocals_1",
-            (
-                select array_agg("artist"."gender")
                 from "l_artist_recording"
                 join "link" on "link"."id" = "l_artist_recording"."link"
                 join "link_attribute" on "link_attribute"."link" = "link"."id"
@@ -144,7 +148,7 @@ def process_artist(cursor, artist_id: int, args):
                 where "l_artist_recording"."entity1" = "recording"."id"
                 and "link"."link_type" = 149  -- vocals
                 and "link_attribute"."attribute_type" = 4  -- lead
-            ) as "lead_vocals_2",
+            ) as "lead_vocals_1",
             (
                 select array_agg("artist"."gender")
                 from "l_artist_recording"
@@ -156,8 +160,14 @@ def process_artist(cursor, artist_id: int, args):
                     select 1 from "link_attribute" 
                     where "link_attribute"."link" = "link"."id" and "link_attribute"."attribute_type" = 12  -- background
                 )
+            ) as "lead_vocals_2",
+            (
+                select array_agg("artist"."gender")
+                from "artist" 
+                join "artist_credit_name" on "artist"."id" = "artist_credit_name"."artist"
+                where "recording"."artist_credit" = "artist_credit_name"."artist_credit"
             ) as "lead_vocals_3"
-    """
+        """
 
     recordings_query = select + SQL("""
         FROM "musicbrainz"."recording"
@@ -204,17 +214,18 @@ def process_artist(cursor, artist_id: int, args):
         is_single_from = search_key_title in single_from_relations and release_group_mb_id in single_from_relations[search_key_title]
 
         lead_vocals = None
-        is_instrumental = entry['language'] == 'zxx'
 
-        # PRIO 1: if artist is a person, no second artist, and song language is defined (not instrumental): use gender
-        # of artist
-        lead_vocals_1 = set(entry['lead_vocals_1'])
-        if lead_vocals_1 == {1} and not is_instrumental:  # only male
+        # PRIO 1: if lead vocals for the recording are defined, use the gender(s) of the associated person/people
+        lead_vocals_1 = set(entry['lead_vocals_1'] or [])
+        if 1 in lead_vocals_1 and 2 in lead_vocals_1:
+            lead_vocals = "x"
+        elif 1 in lead_vocals_1:
             lead_vocals = "m"
-        elif lead_vocals_1 == {2} and not is_instrumental:  # only female
+        elif 2 in lead_vocals_1:
             lead_vocals = "f"
         else:
-            # PRIO 2: if lead vocals for the recording are defined, use the gender(s) of the associated person/people
+            # PRIO 2: if any non-background vocals are defined for the recording, use the gender(s) of the
+            # associated person/people
             lead_vocals_2 = set(entry['lead_vocals_2'] or [])
             if 1 in lead_vocals_2 and 2 in lead_vocals_2:
                 lead_vocals = "x"
@@ -223,18 +234,18 @@ def process_artist(cursor, artist_id: int, args):
             elif 2 in lead_vocals_2:
                 lead_vocals = "f"
             else:
-                # PRIO 3: if any non-background vocals are defined for the recording, use the gender(s) of the
-                # associated person/people
-                lead_vocals_3 = set(entry['lead_vocals_3'] or [])
-                if 1 in lead_vocals_3 and 2 in lead_vocals_3:
-                    lead_vocals = "x"
-                elif 1 in lead_vocals_3:
-                    lead_vocals = "m"
-                elif 2 in lead_vocals_3:
-                    lead_vocals = "f"
-                elif is_instrumental:
+                if entry['language'] == 'zxx':
                     # PRIO 3: if no song language and no vocals, then set lead vocals to instrumental as well
                     lead_vocals = "i"
+                elif entry['language']:
+                    # PRIO 3: if all artists is a persons of the same gender and song language is defined (not
+                    # instrumental): use gender of artist(s).
+                    # Should not be prio 1, to avoid mistakes with e.g. Mike Oldfield - Moonlight Shadow.
+                    lead_vocals_3 = set(entry['lead_vocals_3'])
+                    if lead_vocals_3 == {1}:  # only male
+                        lead_vocals = "m"
+                    elif lead_vocals_3 == {2}:  # only female
+                        lead_vocals = "f"
 
         song = Entry(
             title=title,
@@ -256,11 +267,14 @@ def process_artist(cursor, artist_id: int, args):
         )
 
         if song.recording_mb_id not in songs:
-            songs[song.recording_mb_id] = []
-        songs[song.recording_mb_id].append(song)
+            songs[song.recording_mb_id] = [song]
+        else:
+            songs[song.recording_mb_id].append(song)
 
+    logger.info("start")
     for entry in query(cursor, recordings_query):
         process_entry(entry)
+    logger.info("soundtrack")
     for entry in query(cursor, recordings_query_soundtrack):
         process_entry(entry)
 
@@ -281,40 +295,34 @@ def process_artist(cursor, artist_id: int, args):
                 print()
                 print(best_match)
 
-        album_values[best_match.release_group_id] = SQL("""(
-            {release_group_id}, {release_group_mb_id}, {release_group_name}, {release_group_year}, {is_soundtrack},
-             {is_single}, {is_main_album}
-        )""").format(
-            release_group_id=Literal(best_match.release_group_id),
-            release_group_mb_id=Literal(best_match.release_group_mb_id),
-            release_group_name=Literal(best_match.release_group_name),
-            release_group_year=Literal(best_match.release_group_year),
-            is_soundtrack=Literal(best_match.is_soundtrack_album()),
-            is_single=Literal(best_match.release_type == 2),
-            is_main_album=Literal(best_match.is_main_album())
-        ).as_string()
+        album_values[best_match.release_group_id] = [
+            best_match.release_group_id,
+            best_match.release_group_mb_id,
+            best_match.release_group_name,
+            best_match.release_group_year,
+            best_match.is_soundtrack_album(),
+            best_match.release_type == 2,
+            best_match.is_main_album()
+        ]
 
-        song_values[best_match.recording_id] = SQL("""(
-            {recording_id}, {recording_mb_id}, {work_mb_id}, {title}, {artist_id},
-            {second_artist_id}, {release_group_id}, {is_single_from}, {language}, {lead_vocals}, {recording_score}
-        )""").format(
-            recording_id=Literal(best_match.recording_id),
-            recording_mb_id=Literal(best_match.recording_mb_id),
-            work_mb_id=Literal(best_match.work_mb_id),
-            title=Literal(best_match.title),
-            artist_id=Literal(artist_id),
-            second_artist_id=Literal(best_match.second_artist_id),
-            release_group_id=Literal(best_match.release_group_id),
-            is_single_from=Literal(best_match.is_single_from),
-            language=Literal(best_match.language),
-            lead_vocals=Literal(best_match.lead_vocals),
-            recording_score=Literal(best_match.recording_score)
-        ).as_string()
+        song_values[best_match.recording_id] = [
+            best_match.recording_id,
+            best_match.recording_mb_id,
+            best_match.work_mb_id,
+            best_match.title,
+            artist_id,
+            best_match.second_artist_id,
+            best_match.release_group_id,
+            best_match.is_single_from,
+            best_match.language,
+            best_match.lead_vocals,
+            best_match.recording_score
+        ]
 
     if len(album_values):
         insert_album = """
             INSERT INTO "musicbrainz_export"."mb_album" (id, mb_id, title, release_year, is_soundtrack, is_single, is_main_album)
-            VALUES {}
+            VALUES (%s)
             ON CONFLICT(id) DO UPDATE SET
              mb_id = EXCLUDED.mb_id, 
              title = EXCLUDED.title, 
@@ -322,15 +330,15 @@ def process_artist(cursor, artist_id: int, args):
              is_single = EXCLUDED.is_single,
              is_soundtrack = EXCLUDED.is_soundtrack,
              is_main_album = EXCLUDED.is_main_album;
-        """.format(", ".join(album_values.values()))
-        cursor.execute(insert_album)
+        """
+        cursor.executemany(insert_album, album_values.values())
 
     if len(song_values):
         insert_song = """
             INSERT INTO "musicbrainz_export"."mb_song" (
               id, mb_id, mb_work_id, title, artist_id, second_artist_id, album_id, is_single, language, lead_vocals, score
             )
-            VALUES {}
+            VALUES (%s)
             ON CONFLICT(id) DO UPDATE SET
              mb_id = EXCLUDED.mb_id,
              mb_work_id = EXCLUDED.mb_work_id,
@@ -342,8 +350,8 @@ def process_artist(cursor, artist_id: int, args):
              language = EXCLUDED.language,
              lead_vocals = EXCLUDED.lead_vocals,
              score = EXCLUDED.score;
-        """.format(", ".join(song_values.values()))
-        cursor.execute(insert_song)
+        """
+        cursor.executemany(insert_song, song_values.values())
 
 
 try:
