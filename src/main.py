@@ -322,7 +322,7 @@ def process_artist(cursor, artist_id: int, args):
     if len(album_values):
         insert_album = """
             INSERT INTO "musicbrainz_export"."mb_album" (id, mb_id, title, release_year, is_soundtrack, is_single, is_main_album)
-            VALUES (%s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT(id) DO UPDATE SET
              mb_id = EXCLUDED.mb_id, 
              title = EXCLUDED.title, 
@@ -338,7 +338,7 @@ def process_artist(cursor, artist_id: int, args):
             INSERT INTO "musicbrainz_export"."mb_song" (
               id, mb_id, mb_work_id, title, artist_id, second_artist_id, album_id, is_single, language, lead_vocals, score
             )
-            VALUES (%s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT(id) DO UPDATE SET
              mb_id = EXCLUDED.mb_id,
              mb_work_id = EXCLUDED.mb_work_id,
