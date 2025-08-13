@@ -188,7 +188,7 @@ Execute the `main.py` script:
 python src/main.py
 ```
 
-Executing the script will take ca. 8 hours using the recommended EC2 instance. 
+Executing the script will take ca. 24 hours using the recommended EC2 instance. 
 
 ### Fill table `mb_song_alias`
 
@@ -226,15 +226,38 @@ pg_restore -h 127.0.0.1 -d tijdloze -U postgres -W --no-owner --role=tijdloze < 
 pg_restore -h 127.0.0.1 -d tijdloze -U postgres -W --no-owner --role=tijdloze < mb_song_alias.dump
 ```
 
-## Query for creating benchmarking dataset
+## Benchmarking
+
+The benchmarking script compared the data that can be automatically extracted from the Musicbrainz dataset with the "ground truth" data that comes from the tijdloze.rocks database.
+
+Of the 2954 songs that are in the database (as of the start of 2025), 2909 (98.5%) can be matched with the musicbrainz dataset. Of those that are matched, the current implementation generates the following KPIs for different properties that can be extracted from the Musicbrainz dataset:
+
+|                       | Album      | Country    | Language   | Lead vocals gender |
+|-----------------------|------------|------------|------------|--------------------|
+| Correctly extracted   | 2711 (93%) | 2872 (99%) | 2618 (90%) | 1884 (64%)         |
+| Incorrectly extracted | 198 (7%)   | 35 (1%)    | 17 (1%)    | 107 (4%)           |
+| No value extracted    |            | 2          | 274 (9%)   | 918 (32%)          |
+
+### Query for creating benchmarking dataset
 
 ```postgresql
 SELECT
   song.id,
   song.title,
-  album.id as "album_id", album.title as "album_title", album.release_year, album.musicbrainz_id,
-  artist.id as "artist_id", artist.name as "artist_name", artist.country_id as "artist_country_id", artist.musicbrainz_id as "artist_musicbrainz_id",
-  artist2.id as "artist2_id", artist2.name as "artist2_name", artist2.country_id as "artist2_country_id", artist2.musicbrainz_id as "artist2_musicbrainz_id"
+  song.language_id,
+  song.lead_vocals_id,
+  album.id as "album_id",
+  album.title as "album_title",
+  album.release_year,
+  album.musicbrainz_id,
+  artist.id as "artist_id",
+  artist.name as "artist_name",
+  artist.country_id as "artist_country_id",
+  artist.musicbrainz_id as "artist_musicbrainz_id",
+  artist2.id as "artist2_id", 
+  artist2.name as "artist2_name", 
+  artist2.country_id as "artist2_country_id", 
+  artist2.musicbrainz_id as "artist2_musicbrainz_id"
 FROM song
   JOIN album ON album.id = song.album_id
   JOIN artist ON artist.id = song.artist_id

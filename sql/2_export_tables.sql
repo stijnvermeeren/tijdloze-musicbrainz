@@ -39,6 +39,7 @@ CREATE TABLE "musicbrainz_export"."mb_song"
     "album_id"  int,
     "is_single" boolean,
     "language"  varchar,
+    "lead_vocals" varchar,
     "score"     int
 );
 

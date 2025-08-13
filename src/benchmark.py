@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 
+from benchmark_property import BenchmarkProperty, Country, LeadVocals, Language, Album
 from util import query, search_key
 import os
-import psycopg2
+import re
+import psycopg
+from psycopg.sql import SQL, Literal
 import csv
 import dataclasses
 from dotenv import load_dotenv
@@ -25,6 +28,8 @@ class Song:
     title: str
     matched_alias: str
     song_mb_id: str
+    language_id: str
+    lead_vocals_id: str
     album_title: str
     album_mb_id: str
     release_year: int
@@ -52,12 +57,14 @@ def song_from_result(entry):
     return Song(
         title=entry['title'],
         matched_alias=entry['matched_alias'],
-        song_mb_id=entry['song_mb_id'],
+        song_mb_id=str(entry['song_mb_id']),
+        language_id=entry['language_id'],
+        lead_vocals_id=entry['lead_vocals_id'],
         artist=entry['name'],
-        artist_mb_id=entry['artist_mb_id'],
+        artist_mb_id=str(entry['artist_mb_id']),
         country_id=entry['country_id'],
         album_title=entry['album_title'],
-        album_mb_id=entry['album_mb_id'],
+        album_mb_id=str(entry['album_mb_id']),
         release_year=entry['release_year'],
         is_single_from=entry['single_relationship'],
         is_single=entry['is_single'],
@@ -82,23 +89,27 @@ def search_songs(cursor, artist_ids: list[int], search_title: str, second_artist
     if len(artist_ids) == 0:
         return None
 
-    where = """("mb_song_alias"."alias" LIKE '{}%')""".format(search_key(search_title))
+    where = SQL("""("mb_song_alias"."alias" LIKE {})""").format(Literal(search_key(search_title) + '%')).as_string()
 
-    where2 = """(
+    where2 = SQL("""(
         LENGTH("mb_song_alias"."alias") < 255 
         AND
-        levenshtein_less_equal("mb_song_alias"."alias", '{}', 1) < 2
-    )""".format(search_key(search_title))
+        levenshtein_less_equal("mb_song_alias"."alias", {}, 1) < 2
+    )""").format(Literal(search_key(search_title))).as_string()
 
     artist_where = f'"mb_artist"."id" IN ({", ".join([str(id) for id in artist_ids])})'
     if second_artist_ids:
-        artist_where += f' AND second_artist."id" IN ({", ".join([str(id) for id in second_artist_ids])})'
+        artist_where += SQL(' AND second_artist."id" IN ({})').format(
+            SQL(',').join(map(Literal, second_artist_ids))
+        ).as_string()
 
     recordings_query_template = """
         SELECT DISTINCT
            mb_song.mb_id as song_mb_id,
            mb_song_alias.alias as matched_alias,
            mb_song.title,
+           mb_song.language as language_id,
+           mb_song.lead_vocals as lead_vocals_id,
            mb_song.is_single AS single_relationship,
            mb_song.score AS recording_score,
            mb_album.title as album_title,
@@ -144,34 +155,14 @@ def search_songs(cursor, artist_ids: list[int], search_title: str, second_artist
 
 @dataclass
 class MatchResult:
-    song_id: int
-    title: str
-    artist: str
-    db_album_title: str
-    db_album_year: int
-    db_album_mb_id: str
-    mb_album_title: str
-    mb_album_year: int
-    mb_album_mb_id: str
-    mb_recording_id: str
+    db_data: dict
+    song: Song
 
-def process_song(cursor, row):
-    if row["artist2_name"]:
-        artist_name = "{} & {}".format(row["artist_name"], row["artist2_name"])
-    else:
-        artist_name = row["artist_name"]
-    title = row["title"]
-    print()
-    print("{} - {}".format(artist_name, title))
 
-    artist_db = "{} {} ({})".format(row["artist_musicbrainz_id"], row["artist_name"], row["artist_country_id"])
-    print("DB: {}".format(artist_db))
-
-    song = None
-
+def search_song(cursor, artist_name, title):
     artist_ids = search_artist(cursor, artist_name)
     if len(artist_ids):
-        song = search_songs(cursor, artist_ids, title)
+        return search_songs(cursor, artist_ids, title)
     else:
         # try with second artist
         # TODO make splitting more flexible
@@ -180,7 +171,12 @@ def process_song(cursor, row):
         second_artist_name = "&".join(split[1:])
         main_artist_ids = search_artist(cursor, main_artist_name)
         second_artist_ids = search_artist(cursor, second_artist_name)
-        song = search_songs(cursor, main_artist_ids, title, second_artist_ids=second_artist_ids)
+        return search_songs(cursor, main_artist_ids, title, second_artist_ids=second_artist_ids)
+
+
+def process_match(row, song):
+    artist_db = "{} {} ({})".format(row["artist_musicbrainz_id"], row["artist_name"], row["artist_country_id"])
+    print("DB: {}".format(artist_db))
 
     if song is not None:
         artist_mb = "{} {} ({})".format(
@@ -203,74 +199,102 @@ def process_song(cursor, row):
         else:
             print("MB: {}".format(album_mb))
 
-    return MatchResult(
-        song_id=row["id"],
-        artist=row["artist_name"],
-        title=row["title"],
-        db_album_title=row["album_title"],
-        db_album_year=row["release_year"],
-        db_album_mb_id=row["musicbrainz_id"],
-        mb_album_title=song.album_title if song else None,
-        mb_album_year=song.release_year if song else None,
-        mb_album_mb_id=song.album_mb_id if song else None,
-        mb_recording_id=song.song_mb_id if song else None
-    )
+    return MatchResult(row, song)
 
 
-try:
-    parser=argparse.ArgumentParser()
-    parser.add_argument("--artist")
-    parser.add_argument("--title")
-    args=parser.parse_args()
-
-    results = []
-
-    with psycopg2.connect(
-        host=os.getenv("MB_DB_HOST"),
-        database=os.getenv("MB_DB_NAME"),
-        user=os.getenv("MB_DB_USER"),
-        password=os.getenv("MB_DB_PASSWORD")
-    ) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SET search_path = musicbrainz, public, musicbrainz_export;")
-            with open('benchmark/default.csv', encoding="utf-8-sig") as csvfile:
-                 reader = csv.DictReader(csvfile)
-                 for row in tqdm(reader):
-                     if args.artist and not row['artist_name'].lower().startswith(args.artist.lower()):
-                         continue
-                     if args.title and not row['title'].lower().startswith(args.title.lower()):
-                         continue
-                     results.append(process_song(cursor, row))
-
+def stats_for_property(results: list[MatchResult], property: BenchmarkProperty):
     total_count = len(results)
-    missing = [item for item in results if item.mb_album_mb_id is None]
-    wrong = [item for item in results if item.mb_album_mb_id and item.mb_album_mb_id != item.db_album_mb_id]
+    missing = [item for item in results if property.mb_property(item.song) is None]
+    wrong = [
+        item for item in results
+        if property.mb_property(item.song) and property.mb_property(item.song) != property.db_property(item.db_data)
+    ]
     missing_count = len(missing)
     wrong_count = len(wrong)
     correct_count = total_count - missing_count - wrong_count
 
     print()
-    print("NO MUSICBRAINZ MATCH:")
-    print()
-    for item in missing:
-        print(f"({item.song_id}) {item.artist} - {item.title}")
-        print(f"  DB: ({item.db_album_mb_id}) {item.db_album_title} ({item.db_album_year})")
-        print()
-
-    print()
-    print("INCORRECT MUSICBRAINZ MATCH:")
-    print()
-    for item in wrong:
-        print(f"({item.song_id}) {item.artist} - {item.title}")
-        print(f"  DB: ({item.db_album_mb_id}) {item.db_album_title} ({item.db_album_year})")
-        print(f"  MB: ({item.mb_album_mb_id}) {item.mb_album_title} ({item.mb_album_year}) [{item.mb_recording_id}]")
-        print()
-
-    print()
-    print("STATS")
+    print(f"STATS: {property.title}")
     print(f"Total: {total_count}")
-    print(f"Correct: {correct_count} ({(correct_count / total_count):.2%})")
-    print(f"Missing: {missing_count} ({(missing_count / total_count):.2%})")
-    print(f"Wrong: {wrong_count} ({(wrong_count / total_count):.2%})")
-except psycopg2.DatabaseError as error:
+    if total_count:
+        print(f"Correct: {correct_count} ({(correct_count / total_count):.2%})")
+        print(f"Missing: {missing_count} ({(missing_count / total_count):.2%})")
+        print(f"Wrong: {wrong_count} ({(wrong_count / total_count):.2%})")
+
+def mistakes_for_property(results: list[MatchResult], property: BenchmarkProperty):
+    missing = [item for item in results if property.mb_property(item.song) is None]
+    wrong = [
+        item for item in results
+        if property.mb_property(item.song) and property.mb_property(item.song) != property.db_property(item.db_data)
+    ]
+
+    print()
+    print(f"MISSING VALUES: {property.title}")
+    for item in missing:
+        property.log(item.db_data, item.song)
+
+    print()
+    print(f"INCORRECT VALUE: {property.title}")
+    for item in wrong:
+        property.log(item.db_data, item.song)
+
+try:
+    parser=argparse.ArgumentParser()
+    parser.add_argument("--artist")
+    parser.add_argument("--title")
+    parser.add_argument("--query")
+    args=parser.parse_args()
+
+    results = []
+
+    conn_str = f"""postgresql://{os.getenv("MB_DB_USER")}:{os.getenv("MB_DB_PASSWORD")}@{os.getenv("MB_DB_HOST")}:5432/{os.getenv("MB_DB_NAME")}"""
+    with psycopg.connect(conn_str) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SET search_path = musicbrainz, public, musicbrainz_export;")
+            if args.query:
+                parts = [part for part in re.split(r"\s+", args.query) if part]
+                best_song = None
+                best_score = 0
+                for i in range(len(parts) - 1):
+                    artist_name = " ".join(parts[:i + 1])
+                    title = " ".join(parts[i + 1:])
+                    song = search_song(cursor, artist_name=artist_name, title=title)
+                    if song:
+                        score = song.relevance_for_query(title)
+                        if score > best_score:
+                            best_song = song
+                            best_score = score
+                print(best_song)
+            else:
+                with open('benchmark/default.csv', encoding="utf-8-sig") as csvfile:
+                     reader = csv.DictReader(csvfile)
+                     for row in tqdm(reader):
+                         if args.artist and not row['artist_name'].lower().startswith(args.artist.lower()):
+                             continue
+                         if args.title and not row['title'].lower().startswith(args.title.lower()):
+                             continue
+
+                         if row["artist2_name"]:
+                             artist_name = "{} & {}".format(row["artist_name"], row["artist2_name"])
+                         else:
+                             artist_name = row["artist_name"]
+                         title = row["title"]
+                         print()
+                         print("{} - {}".format(artist_name, title))
+
+                         song = search_song(cursor, artist_name=artist_name, title=title)
+                         results.append(process_match(row, song))
+
+    with_match = [item for item in results if item.song]
+
+    mistakes_for_property(results, Album())
+    mistakes_for_property(with_match, Country())
+    mistakes_for_property(with_match, Language())
+    mistakes_for_property(with_match, LeadVocals())
+
+    stats_for_property(with_match, Country())
+    stats_for_property(with_match, Language())
+    stats_for_property(with_match, LeadVocals())
+    stats_for_property(results, Album())
+except psycopg.DatabaseError as error:
     print("Error: {}".format(error))
