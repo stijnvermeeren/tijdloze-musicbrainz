@@ -234,9 +234,9 @@ Of the 2954 songs that are in the database (as of the start of 2025), 2909 (98.5
 
 |                       | Album      | Country    | Language   | Lead vocals gender |
 |-----------------------|------------|------------|------------|--------------------|
-| Correctly extracted   | 2711 (93%) | 2909 (99%) | 2618 (90%) | 1876 (64%)         |
-| Incorrectly extracted | 198 (7%)   | 35 (1%)    | 17 (1%)    | 106 (4%)           |
-| No value extracted    |            | 2          | 274 (9%)   | 927 (32%)          |
+| Correctly extracted   | 2711 (93%) | 2872 (99%) | 2618 (90%) | 1884 (64%)         |
+| Incorrectly extracted | 198 (7%)   | 35 (1%)    | 17 (1%)    | 107 (4%)           |
+| No value extracted    |            | 2          | 274 (9%)   | 918 (32%)          |
 
 ### Query for creating benchmarking dataset
 

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from benchmark_property import BenchmarkProperty, Country, LeadVocals, Language, Album
 from util import query, search_key
 import os
+import re
 import psycopg
 from psycopg.sql import SQL, Literal
 import csv
@@ -158,21 +159,10 @@ class MatchResult:
     song: Song
 
 
-def process_song(cursor, row):
-    if row["artist2_name"]:
-        artist_name = "{} & {}".format(row["artist_name"], row["artist2_name"])
-    else:
-        artist_name = row["artist_name"]
-    title = row["title"]
-    print()
-    print("{} - {}".format(artist_name, title))
-
-    artist_db = "{} {} ({})".format(row["artist_musicbrainz_id"], row["artist_name"], row["artist_country_id"])
-    print("DB: {}".format(artist_db))
-
+def search_song(cursor, artist_name, title):
     artist_ids = search_artist(cursor, artist_name)
     if len(artist_ids):
-        song = search_songs(cursor, artist_ids, title)
+        return search_songs(cursor, artist_ids, title)
     else:
         # try with second artist
         # TODO make splitting more flexible
@@ -181,7 +171,12 @@ def process_song(cursor, row):
         second_artist_name = "&".join(split[1:])
         main_artist_ids = search_artist(cursor, main_artist_name)
         second_artist_ids = search_artist(cursor, second_artist_name)
-        song = search_songs(cursor, main_artist_ids, title, second_artist_ids=second_artist_ids)
+        return search_songs(cursor, main_artist_ids, title, second_artist_ids=second_artist_ids)
+
+
+def process_match(row, song):
+    artist_db = "{} {} ({})".format(row["artist_musicbrainz_id"], row["artist_name"], row["artist_country_id"])
+    print("DB: {}".format(artist_db))
 
     if song is not None:
         artist_mb = "{} {} ({})".format(
@@ -247,6 +242,7 @@ try:
     parser=argparse.ArgumentParser()
     parser.add_argument("--artist")
     parser.add_argument("--title")
+    parser.add_argument("--query")
     args=parser.parse_args()
 
     results = []
@@ -255,14 +251,39 @@ try:
     with psycopg.connect(conn_str) as conn:
         with conn.cursor() as cursor:
             cursor.execute("SET search_path = musicbrainz, public, musicbrainz_export;")
-            with open('benchmark/default.csv', encoding="utf-8-sig") as csvfile:
-                 reader = csv.DictReader(csvfile)
-                 for row in tqdm(reader):
-                     if args.artist and not row['artist_name'].lower().startswith(args.artist.lower()):
-                         continue
-                     if args.title and not row['title'].lower().startswith(args.title.lower()):
-                         continue
-                     results.append(process_song(cursor, row))
+            if args.query:
+                parts = [part for part in re.split(r"\s+", args.query) if part]
+                best_song = None
+                best_score = 0
+                for i in range(len(parts) - 1):
+                    artist_name = " ".join(parts[:i + 1])
+                    title = " ".join(parts[i + 1:])
+                    song = search_song(cursor, artist_name=artist_name, title=title)
+                    if song:
+                        score = song.relevance_for_query(title)
+                        if score > best_score:
+                            best_song = song
+                            best_score = score
+                print(best_song)
+            else:
+                with open('benchmark/default.csv', encoding="utf-8-sig") as csvfile:
+                     reader = csv.DictReader(csvfile)
+                     for row in tqdm(reader):
+                         if args.artist and not row['artist_name'].lower().startswith(args.artist.lower()):
+                             continue
+                         if args.title and not row['title'].lower().startswith(args.title.lower()):
+                             continue
+
+                         if row["artist2_name"]:
+                             artist_name = "{} & {}".format(row["artist_name"], row["artist2_name"])
+                         else:
+                             artist_name = row["artist_name"]
+                         title = row["title"]
+                         print()
+                         print("{} - {}".format(artist_name, title))
+
+                         song = search_song(cursor, artist_name=artist_name, title=title)
+                         results.append(process_match(row, song))
 
     with_match = [item for item in results if item.song]
 

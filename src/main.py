@@ -238,7 +238,7 @@ def process_artist(cursor, artist_id: int, args):
                     # PRIO 3: if no song language and no vocals, then set lead vocals to instrumental as well
                     lead_vocals = "i"
                 elif entry['language']:
-                    # PRIO 3: if all artists is a persons of the same gender and song language is defined (not
+                    # PRIO 3: if all artists are persons of the same gender and song language is defined (not
                     # instrumental): use gender of artist(s).
                     # Should not be prio 1, to avoid mistakes with e.g. Mike Oldfield - Moonlight Shadow.
                     lead_vocals_3 = set(entry['lead_vocals_3'])
